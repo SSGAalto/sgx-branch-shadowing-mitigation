@@ -54,6 +54,10 @@ static cl::opt<bool> EnableMachineCombinerPass("x86-machine-combiner",
                                cl::desc("Enable the machine combiner pass"),
                                cl::init(true), cl::Hidden);
 
+static cl::opt<bool> EnableBranchConversion("x86-branch-conversion",
+                                            cl::desc("Enable the X86 branch-to-cmov conversion."),
+                                            cl::init(false), cl::Hidden);
+
 namespace llvm {
 
 void initializeWinEHStatePassPass(PassRegistry &);
@@ -80,6 +84,8 @@ extern "C" void LLVMInitializeX86Target() {
   initializeX86CmovConverterPassPass(PR);
   initializeX86ExecutionDepsFixPass(PR);
   initializeX86DomainReassignmentPass(PR);
+
+
 }
 
 static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
@@ -445,4 +451,7 @@ void X86PassConfig::addPreEmitPass() {
 
 void X86PassConfig::addPreEmitPass2() {
   addPass(createX86RetpolineThunksPass());
+
+  if (EnableBranchConversion)
+      addPass(createX86BranchConversionPass());
 }
