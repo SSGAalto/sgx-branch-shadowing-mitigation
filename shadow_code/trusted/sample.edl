@@ -1,0 +1,27 @@
+/* sample.edl - Top EDL file. */
+
+enclave {
+    trusted {
+        public void ecall_setup();
+        public void ecall_victim_jne(int number);
+        public void ecall_victim_ret(int number);
+
+        /* These are essentially just for testing that the above victim
+           function behave as expected. We do not want return value handling
+           in the actual victim calls so we can minimize noise when simulating
+           our shadowing attack (i.e., relying on normal EEXIT instead of
+           frequent AEX events. */
+        public int ecall_victim_jne_test(int input);
+        public int ecall_victim_ret_test(int input);
+    };
+
+    untrusted {
+        void ocall_log(int level, [in, string] const char *str);
+
+        void ocall_set_branch_victim_jne(uint64_t f,
+            uint64_t src, uint64_t dst);
+
+        void ocall_set_branch_victim_ret(uint64_t f,
+            uint64_t a_r, uint64_t a_i, uint64_t a_e);
+    };
+};

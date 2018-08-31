@@ -1,0 +1,6 @@
+#ifndef SAMPLE_BUILD_H
+#define SAMPLE_BUILD_H
+
+#define CMAKE_BUILD_TYPE "@CMAKE_BUILD_TYPE@"
+
+#endif //SAMPLE_BUILD_H
