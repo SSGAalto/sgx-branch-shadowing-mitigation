@@ -54,11 +54,7 @@ createLocalCompileCallbackManager(const Triple &T,
 std::function<std::unique_ptr<IndirectStubsManager>()>
 createLocalIndirectStubsManagerBuilder(const Triple &T) {
   switch (T.getArch()) {
-    default:
-      return [](){
-        return llvm::make_unique<
-                       orc::LocalIndirectStubsManager<orc::OrcGenericABI>>();
-      };
+    default: return nullptr;
 
     case Triple::aarch64:
       return [](){

@@ -59,11 +59,6 @@ static cl::opt<bool> PreserveBitcodeUseListOrder(
     cl::desc("Preserve use-list order when writing LLVM bitcode."),
     cl::init(true), cl::Hidden);
 
-static cl::opt<std::string> ClDataLayout("data-layout",
-                                         cl::desc("data layout string to use"),
-                                         cl::value_desc("layout-string"),
-                                         cl::init(""));
-
 static void WriteOutputFile(const Module *M) {
   // Infer the output filename if needed.
   if (OutputFilename.empty()) {
@@ -85,7 +80,7 @@ static void WriteOutputFile(const Module *M) {
   }
 
   if (Force || !CheckBitcodeOutputToConsole(Out->os(), true))
-    WriteBitcodeToFile(*M, Out->os(), PreserveBitcodeUseListOrder, nullptr,
+    WriteBitcodeToFile(M, Out->os(), PreserveBitcodeUseListOrder, nullptr,
                        EmitModuleHash);
 
   // Declare success.
@@ -102,8 +97,8 @@ int main(int argc, char **argv) {
 
   // Parse the file now...
   SMDiagnostic Err;
-  std::unique_ptr<Module> M = parseAssemblyFile(
-      InputFilename, Err, Context, nullptr, !DisableVerify, ClDataLayout);
+  std::unique_ptr<Module> M =
+      parseAssemblyFile(InputFilename, Err, Context, nullptr, !DisableVerify);
   if (!M.get()) {
     Err.print(argv[0], errs());
     return 1;

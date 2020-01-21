@@ -77,7 +77,6 @@
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/MemorySSA.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
-#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constant.h"
@@ -106,6 +105,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVNExpression.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/PredicateInfo.h"
 #include "llvm/Transforms/Utils/VNCoercion.h"
 #include <algorithm>
@@ -2207,7 +2207,7 @@ Value *NewGVN::getNextValueLeader(CongruenceClass *CC) const {
 //
 // - I must be moving to NewClass from OldClass
 // - The StoreCount of OldClass and NewClass is expected to have been updated
-//   for I already if it is a store.
+//   for I already if it is is a store.
 // - The OldClass memory leader has not been updated yet if I was the leader.
 void NewGVN::moveMemoryToNewCongruenceClass(Instruction *I,
                                             MemoryAccess *InstMA,
@@ -2819,7 +2819,6 @@ NewGVN::makePossiblePHIOfOps(Instruction *I,
       for (auto PHIOp : Ops)
         ValuePHI->addIncoming(PHIOp.first, PHIOp.second);
     } else {
-      TempToBlock[ValuePHI] = PHIBlock;
       unsigned int i = 0;
       for (auto PHIOp : Ops) {
         ValuePHI->setIncomingValue(i, PHIOp.first);
@@ -4059,8 +4058,7 @@ bool NewGVN::eliminateInstructions(Function &F) {
           Value *DominatingLeader = EliminationStack.back();
 
           auto *II = dyn_cast<IntrinsicInst>(DominatingLeader);
-          bool isSSACopy = II && II->getIntrinsicID() == Intrinsic::ssa_copy;
-          if (isSSACopy)
+          if (II && II->getIntrinsicID() == Intrinsic::ssa_copy)
             DominatingLeader = II->getOperand(0);
 
           // Don't replace our existing users with ourselves.
@@ -4083,9 +4081,7 @@ bool NewGVN::eliminateInstructions(Function &F) {
           // It's about to be alive again.
           if (LeaderUseCount == 0 && isa<Instruction>(DominatingLeader))
             ProbablyDead.erase(cast<Instruction>(DominatingLeader));
-          // Copy instructions, however, are still dead beacuse we use their
-          // operand as the leader.
-          if (LeaderUseCount == 0 && isSSACopy)
+          if (LeaderUseCount == 0 && II)
             ProbablyDead.insert(II);
           ++LeaderUseCount;
           AnythingReplaced = true;

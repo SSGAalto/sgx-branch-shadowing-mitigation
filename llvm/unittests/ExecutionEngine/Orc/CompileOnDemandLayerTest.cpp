@@ -59,21 +59,9 @@ TEST(CompileOnDemandLayerTest, FindSymbol) {
 
   DummyCallbackManager CallbackMgr;
 
-  ExecutionSession ES(std::make_shared<SymbolStringPool>());
-
-  auto GetResolver =
-      [](orc::VModuleKey) -> std::shared_ptr<llvm::orc::SymbolResolver> {
-    llvm_unreachable("Should never be called");
-  };
-
-  auto SetResolver = [](orc::VModuleKey, std::shared_ptr<orc::SymbolResolver>) {
-    llvm_unreachable("Should never be called");
-  };
-
   llvm::orc::CompileOnDemandLayer<decltype(TestBaseLayer)> COD(
-      ES, TestBaseLayer, GetResolver, SetResolver,
-      [](Function &F) { return std::set<Function *>{&F}; }, CallbackMgr,
-      [] { return llvm::make_unique<DummyStubsManager>(); }, true);
+      TestBaseLayer, [](Function &F) { return std::set<Function *>{&F}; },
+      CallbackMgr, [] { return llvm::make_unique<DummyStubsManager>(); }, true);
 
   auto Sym = COD.findSymbol("foo", true);
 

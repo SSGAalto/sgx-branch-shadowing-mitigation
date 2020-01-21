@@ -15,7 +15,6 @@
 #define LLVM_EXECUTIONENGINE_ORC_IRTRANSFORMLAYER_H
 
 #include "llvm/ExecutionEngine/JITSymbol.h"
-#include "llvm/ExecutionEngine/Orc/Core.h"
 #include <memory>
 #include <string>
 
@@ -31,6 +30,9 @@ template <typename BaseLayerT, typename TransformFtor>
 class IRTransformLayer {
 public:
 
+  /// @brief Handle to a set of added modules.
+  using ModuleHandleT = typename BaseLayerT::ModuleHandleT;
+
   /// @brief Construct an IRTransformLayer with the given BaseLayer
   IRTransformLayer(BaseLayerT &BaseLayer,
                    TransformFtor Transform = TransformFtor())
@@ -40,12 +42,14 @@ public:
   ///        the layer below, along with the memory manager and symbol resolver.
   ///
   /// @return A handle for the added modules.
-  Error addModule(VModuleKey K, std::unique_ptr<Module> M) {
-    return BaseLayer.addModule(std::move(K), Transform(std::move(M)));
+  Expected<ModuleHandleT>
+  addModule(std::shared_ptr<Module> M,
+            std::shared_ptr<JITSymbolResolver> Resolver) {
+    return BaseLayer.addModule(Transform(std::move(M)), std::move(Resolver));
   }
 
-  /// @brief Remove the module associated with the VModuleKey K.
-  Error removeModule(VModuleKey K) { return BaseLayer.removeModule(K); }
+  /// @brief Remove the module associated with the handle H.
+  Error removeModule(ModuleHandleT H) { return BaseLayer.removeModule(H); }
 
   /// @brief Search for the given named symbol.
   /// @param Name The name of the symbol to search for.
@@ -56,22 +60,24 @@ public:
   }
 
   /// @brief Get the address of the given symbol in the context of the module
-  ///        represented by the VModuleKey K. This call is forwarded to the base
+  ///        represented by the handle H. This call is forwarded to the base
   ///        layer's implementation.
-  /// @param K The VModuleKey for the module to search in.
+  /// @param H The handle for the module to search in.
   /// @param Name The name of the symbol to search for.
   /// @param ExportedSymbolsOnly If true, search only for exported symbols.
   /// @return A handle for the given named symbol, if it is found in the
   ///         given module.
-  JITSymbol findSymbolIn(VModuleKey K, const std::string &Name,
+  JITSymbol findSymbolIn(ModuleHandleT H, const std::string &Name,
                          bool ExportedSymbolsOnly) {
-    return BaseLayer.findSymbolIn(K, Name, ExportedSymbolsOnly);
+    return BaseLayer.findSymbolIn(H, Name, ExportedSymbolsOnly);
   }
 
   /// @brief Immediately emit and finalize the module represented by the given
-  ///        VModuleKey.
-  /// @param K The VModuleKey for the module to emit/finalize.
-  Error emitAndFinalize(VModuleKey K) { return BaseLayer.emitAndFinalize(K); }
+  ///        handle.
+  /// @param H Handle for module to emit/finalize.
+  Error emitAndFinalize(ModuleHandleT H) {
+    return BaseLayer.emitAndFinalize(H);
+  }
 
   /// @brief Access the transform functor directly.
   TransformFtor& getTransform() { return Transform; }

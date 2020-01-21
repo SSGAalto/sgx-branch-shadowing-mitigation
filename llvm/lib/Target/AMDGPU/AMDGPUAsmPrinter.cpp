@@ -32,6 +32,7 @@
 #include "Utils/AMDGPUBaseInfo.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/TargetLoweringObjectFile.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCSectionELF.h"
@@ -39,7 +40,6 @@
 #include "llvm/Support/AMDGPUMetadata.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/TargetRegistry.h"
-#include "llvm/Target/TargetLoweringObjectFile.h"
 
 using namespace llvm;
 using namespace llvm::AMDGPU;
@@ -303,8 +303,7 @@ bool AMDGPUAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 
   const AMDGPUSubtarget &STM = MF.getSubtarget<AMDGPUSubtarget>();
   MCContext &Context = getObjFileLowering().getContext();
-  // FIXME: This should be an explicit check for Mesa.
-  if (!STM.isAmdHsaOS() && !STM.isAmdPalOS()) {
+  if (!STM.isAmdHsaOS()) {
     MCSectionELF *ConfigSection =
         Context.getELFSection(".AMDGPU.config", ELF::SHT_PROGBITS, 0);
     OutStreamer->SwitchSection(ConfigSection);
@@ -323,7 +322,7 @@ bool AMDGPUAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 
     if (STM.isAmdPalOS())
       EmitPALMetadata(MF, CurrentProgramInfo);
-    else if (!STM.isAmdHsaOS()) {
+    if (!STM.isAmdHsaOS()) {
       EmitProgramInfoSI(MF, CurrentProgramInfo);
     }
   } else {
@@ -587,8 +586,6 @@ AMDGPUAsmPrinter::SIFunctionResourceInfo AMDGPUAsmPrinter::analyzeResourceUsage(
 
   Info.HasDynamicallySizedStack = FrameInfo.hasVarSizedObjects();
   Info.PrivateSegmentSize = FrameInfo.getStackSize();
-  if (MFI->isStackRealigned())
-    Info.PrivateSegmentSize += FrameInfo.getMaxAlignment();
 
 
   Info.UsesVCC = MRI.isPhysRegUsed(AMDGPU::VCC_LO) ||
@@ -665,11 +662,6 @@ AMDGPUAsmPrinter::SIFunctionResourceInfo AMDGPUAsmPrinter::analyzeResourceUsage(
         case AMDGPU::FLAT_SCR_LO:
         case AMDGPU::FLAT_SCR_HI:
           continue;
-
-        case AMDGPU::XNACK_MASK:
-        case AMDGPU::XNACK_MASK_LO:
-        case AMDGPU::XNACK_MASK_HI:
-          llvm_unreachable("xnack_mask registers should not be used");
 
         case AMDGPU::TBA:
         case AMDGPU::TBA_LO:
@@ -1010,19 +1002,24 @@ void AMDGPUAsmPrinter::EmitProgramInfoSI(const MachineFunction &MF,
     OutStreamer->EmitIntValue(RsrcReg, 4);
     OutStreamer->EmitIntValue(S_00B028_VGPRS(CurrentProgramInfo.VGPRBlocks) |
                               S_00B028_SGPRS(CurrentProgramInfo.SGPRBlocks), 4);
+    unsigned Rsrc2Val = 0;
     if (STM.isVGPRSpillingEnabled(MF.getFunction())) {
       OutStreamer->EmitIntValue(R_0286E8_SPI_TMPRING_SIZE, 4);
       OutStreamer->EmitIntValue(S_0286E8_WAVESIZE(CurrentProgramInfo.ScratchBlocks), 4);
+      if (TM.getTargetTriple().getOS() == Triple::AMDPAL)
+        Rsrc2Val = S_00B84C_SCRATCH_EN(CurrentProgramInfo.ScratchBlocks > 0);
     }
-  }
-
-  if (MF.getFunction().getCallingConv() == CallingConv::AMDGPU_PS) {
-    OutStreamer->EmitIntValue(R_00B02C_SPI_SHADER_PGM_RSRC2_PS, 4);
-    OutStreamer->EmitIntValue(S_00B02C_EXTRA_LDS_SIZE(CurrentProgramInfo.LDSBlocks), 4);
-    OutStreamer->EmitIntValue(R_0286CC_SPI_PS_INPUT_ENA, 4);
-    OutStreamer->EmitIntValue(MFI->getPSInputEnable(), 4);
-    OutStreamer->EmitIntValue(R_0286D0_SPI_PS_INPUT_ADDR, 4);
-    OutStreamer->EmitIntValue(MFI->getPSInputAddr(), 4);
+    if (MF.getFunction().getCallingConv() == CallingConv::AMDGPU_PS) {
+      OutStreamer->EmitIntValue(R_0286CC_SPI_PS_INPUT_ENA, 4);
+      OutStreamer->EmitIntValue(MFI->getPSInputEnable(), 4);
+      OutStreamer->EmitIntValue(R_0286D0_SPI_PS_INPUT_ADDR, 4);
+      OutStreamer->EmitIntValue(MFI->getPSInputAddr(), 4);
+      Rsrc2Val |= S_00B02C_EXTRA_LDS_SIZE(CurrentProgramInfo.LDSBlocks);
+    }
+    if (Rsrc2Val) {
+      OutStreamer->EmitIntValue(RsrcReg + 4 /*rsrc2*/, 4);
+      OutStreamer->EmitIntValue(Rsrc2Val, 4);
+    }
   }
 
   OutStreamer->EmitIntValue(R_SPILLED_SGPRS, 4);

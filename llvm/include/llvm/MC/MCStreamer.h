@@ -16,7 +16,6 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/MC/MCDirectives.h"
@@ -24,8 +23,6 @@
 #include "llvm/MC/MCLinkerOptimizationHint.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MCWinEH.h"
-#include "llvm/Support/Error.h"
-#include "llvm/Support/MD5.h"
 #include "llvm/Support/SMLoc.h"
 #include "llvm/Support/TargetParser.h"
 #include <cassert>
@@ -502,9 +499,6 @@ public:
 
   virtual void EmitCOFFSafeSEH(MCSymbol const *Symbol);
 
-  /// \brief Emits the symbol table index of a Symbol into the current section.
-  virtual void EmitCOFFSymbolIndex(MCSymbol const *Symbol);
-
   /// \brief Emits a COFF section index.
   ///
   /// \param Symbol - Symbol the section number relocation should point to.
@@ -525,10 +519,9 @@ public:
   ///
   /// This corresponds to an assembler statement such as:
   ///  .symver _start, foo@@SOME_VERSION
-  /// \param AliasName - The versioned alias (i.e. "foo@@SOME_VERSION")
+  /// \param Alias - The versioned alias (i.e. "foo@@SOME_VERSION")
   /// \param Aliasee - The aliased symbol (i.e. "_start")
-  virtual void emitELFSymverDirective(StringRef AliasName,
-                                      const MCSymbol *Aliasee);
+  virtual void emitELFSymverDirective(MCSymbol *Alias, const MCSymbol *Aliasee);
 
   /// \brief Emit a Linker Optimization Hint (LOH) directive.
   /// \param Args - Arguments of the LOH.
@@ -612,6 +605,10 @@ public:
   /// pass in a MCExpr for constant integers.
   void EmitULEB128IntValue(uint64_t Value);
 
+  /// \brief Like EmitULEB128Value but pads the output to specific number of
+  /// bytes.
+  void EmitPaddedULEB128IntValue(uint64_t Value, unsigned PadTo);
+
   /// \brief Special case of EmitSLEB128Value that avoids the client having to
   /// pass in a MCExpr for constant integers.
   void EmitSLEB128IntValue(int64_t Value);
@@ -685,6 +682,7 @@ public:
   /// \param NumValues - The number of copies of \p Size bytes to emit.
   /// \param Size - The size (in bytes) of each repeated value.
   /// \param Expr - The expression from which \p Size bytes are used.
+  virtual void emitFill(uint64_t NumValues, int64_t Size, int64_t Expr);
   virtual void emitFill(const MCExpr &NumValues, int64_t Size, int64_t Expr,
                         SMLoc Loc = SMLoc());
 
@@ -755,31 +753,9 @@ public:
 
   /// \brief Associate a filename with a specified logical file number.  This
   /// implements the DWARF2 '.file 4 "foo.c"' assembler directive.
-  unsigned EmitDwarfFileDirective(unsigned FileNo, StringRef Directory,
-                                  StringRef Filename,
-                                  MD5::MD5Result *Checksum = nullptr,
-                                  Optional<StringRef> Source = None,
-                                  unsigned CUID = 0) {
-    return cantFail(
-        tryEmitDwarfFileDirective(FileNo, Directory, Filename, Checksum,
-                                  Source, CUID));
-  }
-
-  /// Associate a filename with a specified logical file number.
-  /// Also associate a directory, optional checksum, and optional source
-  /// text with the logical file.  This implements the DWARF2
-  /// '.file 4 "dir/foo.c"' assembler directive, and the DWARF5
-  /// '.file 4 "dir/foo.c" md5 "..." source "..."' assembler directive.
-  virtual Expected<unsigned> tryEmitDwarfFileDirective(
-      unsigned FileNo, StringRef Directory, StringRef Filename,
-      MD5::MD5Result *Checksum = nullptr, Optional<StringRef> Source = None,
-      unsigned CUID = 0);
-
-  /// Specify the "root" file of the compilation, using the ".file 0" extension.
-  virtual void emitDwarfFile0Directive(StringRef Directory, StringRef Filename,
-                                       MD5::MD5Result *Checksum,
-                                       Optional<StringRef> Source,
-                                       unsigned CUID = 0);
+  virtual unsigned EmitDwarfFileDirective(unsigned FileNo, StringRef Directory,
+                                          StringRef Filename,
+                                          unsigned CUID = 0);
 
   /// \brief This implements the DWARF2 '.loc fileno lineno ...' assembler
   /// directive.
@@ -847,10 +823,6 @@ public:
   /// \pre Offset of \c Hi is greater than the offset \c Lo.
   virtual void emitAbsoluteSymbolDiff(const MCSymbol *Hi, const MCSymbol *Lo,
                                       unsigned Size);
-
-  /// Emit the absolute difference between two symbols encoded with ULEB128.
-  virtual void emitAbsoluteSymbolDiffAsULEB128(const MCSymbol *Hi,
-                                               const MCSymbol *Lo);
 
   virtual MCSymbol *getDwarfLineTableSymbol(unsigned CUID);
   virtual void EmitCFISections(bool EH, bool Debug);

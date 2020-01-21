@@ -135,8 +135,7 @@ class CallAnalyzer : public InstVisitor<CallAnalyzer, bool> {
   bool ContainsNoDuplicateCall;
   bool HasReturn;
   bool HasIndirectBr;
-  bool HasUninlineableIntrinsic;
-  bool UsesVarArgs;
+  bool HasFrameEscape;
 
   /// Number of bytes allocated statically by the callee.
   uint64_t AllocatedSize;
@@ -281,13 +280,12 @@ public:
         IsCallerRecursive(false), IsRecursiveCall(false),
         ExposesReturnsTwice(false), HasDynamicAlloca(false),
         ContainsNoDuplicateCall(false), HasReturn(false), HasIndirectBr(false),
-        HasUninlineableIntrinsic(false), UsesVarArgs(false), AllocatedSize(0),
-        NumInstructions(0), NumVectorInstructions(0), VectorBonus(0),
-        SingleBBBonus(0), EnableLoadElimination(true), LoadEliminationCost(0),
-        NumConstantArgs(0), NumConstantOffsetPtrArgs(0), NumAllocaArgs(0),
-        NumConstantPtrCmps(0), NumConstantPtrDiffs(0),
-        NumInstructionsSimplified(0), SROACostSavings(0),
-        SROACostSavingsLost(0) {}
+        HasFrameEscape(false), AllocatedSize(0), NumInstructions(0),
+        NumVectorInstructions(0), VectorBonus(0), SingleBBBonus(0),
+        EnableLoadElimination(true), LoadEliminationCost(0), NumConstantArgs(0),
+        NumConstantOffsetPtrArgs(0), NumAllocaArgs(0), NumConstantPtrCmps(0),
+        NumConstantPtrDiffs(0), NumInstructionsSimplified(0),
+        SROACostSavings(0), SROACostSavingsLost(0) {}
 
   bool analyzeCall(CallSite CS);
 
@@ -373,7 +371,7 @@ void CallAnalyzer::disableLoadElimination() {
 /// Returns false if unable to compute the offset for any reason. Respects any
 /// simplified values known during the analysis of this callsite.
 bool CallAnalyzer::accumulateGEPOffset(GEPOperator &GEP, APInt &Offset) {
-  unsigned IntPtrWidth = DL.getIndexTypeSizeInBits(GEP.getType());
+  unsigned IntPtrWidth = DL.getPointerSizeInBits();
   assert(IntPtrWidth == Offset.getBitWidth());
 
   for (gep_type_iterator GTI = gep_type_begin(GEP), GTE = gep_type_end(GEP);
@@ -452,12 +450,8 @@ bool CallAnalyzer::visitPHI(PHINode &I) {
   // SROA if it *might* be used in an inappropriate manner.
 
   // Phi nodes are always zero-cost.
-  // FIXME: Pointer sizes may differ between different address spaces, so do we
-  // need to use correct address space in the call to getPointerSizeInBits here?
-  // Or could we skip the getPointerSizeInBits call completely? As far as I can
-  // see the ZeroOffset is used as a dummy value, so we can probably use any
-  // bit width for the ZeroOffset?
-  APInt ZeroOffset = APInt::getNullValue(DL.getPointerSizeInBits(0));
+
+  APInt ZeroOffset = APInt::getNullValue(DL.getPointerSizeInBits());
   bool CheckSROA = I.getType()->isPointerTy();
 
   // Track the constant or pointer with constant offset we've seen so far.
@@ -647,8 +641,7 @@ bool CallAnalyzer::visitPtrToInt(PtrToIntInst &I) {
   // Track base/offset pairs when converted to a plain integer provided the
   // integer is large enough to represent the pointer.
   unsigned IntegerSize = I.getType()->getScalarSizeInBits();
-  unsigned AS = I.getOperand(0)->getType()->getPointerAddressSpace();
-  if (IntegerSize >= DL.getPointerSizeInBits(AS)) {
+  if (IntegerSize >= DL.getPointerSizeInBits()) {
     std::pair<Value *, APInt> BaseAndOffset =
         ConstantOffsetPtrs.lookup(I.getOperand(0));
     if (BaseAndOffset.first)
@@ -681,7 +674,7 @@ bool CallAnalyzer::visitIntToPtr(IntToPtrInst &I) {
   // modifications provided the integer is not too large.
   Value *Op = I.getOperand(0);
   unsigned IntegerSize = Op->getType()->getScalarSizeInBits();
-  if (IntegerSize <= DL.getPointerTypeSizeInBits(I.getType())) {
+  if (IntegerSize <= DL.getPointerSizeInBits()) {
     std::pair<Value *, APInt> BaseAndOffset = ConstantOffsetPtrs.lookup(Op);
     if (BaseAndOffset.first)
       ConstantOffsetPtrs[&I] = BaseAndOffset;
@@ -1232,13 +1225,8 @@ bool CallAnalyzer::visitCallSite(CallSite CS) {
         disableLoadElimination();
         // SROA can usually chew through these intrinsics, but they aren't free.
         return false;
-      case Intrinsic::icall_branch_funnel:
       case Intrinsic::localescape:
-        HasUninlineableIntrinsic = true;
-        return false;
-      case Intrinsic::vastart:
-      case Intrinsic::vaend:
-        UsesVarArgs = true;
+        HasFrameEscape = true;
         return false;
       }
     }
@@ -1574,7 +1562,7 @@ bool CallAnalyzer::analyzeBlock(BasicBlock *BB,
     using namespace ore;
     // If the visit this instruction detected an uninlinable pattern, abort.
     if (IsRecursiveCall || ExposesReturnsTwice || HasDynamicAlloca ||
-        HasIndirectBr || HasUninlineableIntrinsic || UsesVarArgs) {
+        HasIndirectBr || HasFrameEscape) {
       if (ORE)
         ORE->emit([&]() {
           return OptimizationRemarkMissed(DEBUG_TYPE, "NeverInline",
@@ -1620,8 +1608,7 @@ ConstantInt *CallAnalyzer::stripAndComputeInBoundsConstantOffsets(Value *&V) {
   if (!V->getType()->isPointerTy())
     return nullptr;
 
-  unsigned AS = V->getType()->getPointerAddressSpace();
-  unsigned IntPtrWidth = DL.getIndexSizeInBits(AS);
+  unsigned IntPtrWidth = DL.getPointerSizeInBits();
   APInt Offset = APInt::getNullValue(IntPtrWidth);
 
   // Even though we don't look through PHI nodes, we could be called on an
@@ -1645,7 +1632,7 @@ ConstantInt *CallAnalyzer::stripAndComputeInBoundsConstantOffsets(Value *&V) {
     assert(V->getType()->isPointerTy() && "Unexpected operand type!");
   } while (Visited.insert(V).second);
 
-  Type *IntPtrTy = DL.getIntPtrType(V->getContext(), AS);
+  Type *IntPtrTy = DL.getIntPtrType(V->getContext());
   return cast<ConstantInt>(ConstantInt::get(IntPtrTy, Offset));
 }
 
@@ -1917,8 +1904,7 @@ int llvm::getCallsiteCost(CallSite CS, const DataLayout &DL) {
       // size of the byval type by the target's pointer size.
       PointerType *PTy = cast<PointerType>(CS.getArgument(I)->getType());
       unsigned TypeSize = DL.getTypeSizeInBits(PTy->getElementType());
-      unsigned AS = PTy->getAddressSpace();
-      unsigned PointerSize = DL.getPointerSizeInBits(AS);
+      unsigned PointerSize = DL.getPointerSizeInBits();
       // Ceiling division.
       unsigned NumStores = (TypeSize + PointerSize - 1) / PointerSize;
 
@@ -1961,19 +1947,6 @@ InlineCost llvm::getInlineCost(
   // Cannot inline indirect calls.
   if (!Callee)
     return llvm::InlineCost::getNever();
-
-  // Never inline calls with byval arguments that does not have the alloca
-  // address space. Since byval arguments can be replaced with a copy to an
-  // alloca, the inlined code would need to be adjusted to handle that the
-  // argument is in the alloca address space (so it is a little bit complicated
-  // to solve).
-  unsigned AllocaAS = Callee->getParent()->getDataLayout().getAllocaAddrSpace();
-  for (unsigned I = 0, E = CS.arg_size(); I != E; ++I)
-    if (CS.isByValArgument(I)) {
-      PointerType *PTy = cast<PointerType>(CS.getArgument(I)->getType());
-      if (PTy->getAddressSpace() != AllocaAS)
-        return llvm::InlineCost::getNever();
-    }
 
   // Calls to functions with always-inline attributes should be inlined
   // whenever possible.
@@ -2042,21 +2015,12 @@ bool llvm::isInlineViable(Function &F) {
           cast<CallInst>(CS.getInstruction())->canReturnTwice())
         return false;
 
-      if (CS.getCalledFunction())
-        switch (CS.getCalledFunction()->getIntrinsicID()) {
-        default:
-          break;
-        // Disallow inlining of @llvm.icall.branch.funnel because current
-        // backend can't separate call targets from call arguments.
-        case llvm::Intrinsic::icall_branch_funnel:
-        // Disallow inlining functions that call @llvm.localescape. Doing this
-        // correctly would require major changes to the inliner.
-        case llvm::Intrinsic::localescape:
-        // Disallow inlining of functions that access VarArgs.
-        case llvm::Intrinsic::vastart:
-        case llvm::Intrinsic::vaend:
-          return false;
-        }
+      // Disallow inlining functions that call @llvm.localescape. Doing this
+      // correctly would require major changes to the inliner.
+      if (CS.getCalledFunction() &&
+          CS.getCalledFunction()->getIntrinsicID() ==
+              llvm::Intrinsic::localescape)
+        return false;
     }
   }
 

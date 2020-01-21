@@ -217,7 +217,7 @@ struct PartialInlinerImpl {
   // outline function due to code size.
   std::pair<bool, Function *> unswitchFunction(Function *F);
 
-  // This class speculatively clones the function to be partial inlined.
+  // This class speculatively clones the the function to be partial inlined.
   // At the end of partial inlining, the remaining callsites to the cloned
   // function that are not partially inlined will be fixed up to reference
   // the original function, and the cloned function will be erased.
@@ -769,12 +769,12 @@ bool PartialInlinerImpl::shouldPartialInline(
     BlockFrequency WeightedOutliningRcost) {
   using namespace ore;
 
+  if (SkipCostAnalysis)
+    return true;
+
   Instruction *Call = CS.getInstruction();
   Function *Callee = CS.getCalledFunction();
   assert(Callee == Cloner.ClonedFunc);
-
-  if (SkipCostAnalysis)
-    return isInlineViable(*Callee);
 
   Function *Caller = CS.getCaller();
   auto &CalleeTTI = (*GetTTI)(*Callee);
@@ -1384,8 +1384,7 @@ bool PartialInlinerImpl::tryPartialInline(FunctionCloner &Cloner) {
   if (CalleeEntryCount)
     computeCallsiteToProfCountMap(Cloner.ClonedFunc, CallSiteToProfCountMap);
 
-  uint64_t CalleeEntryCountV =
-      (CalleeEntryCount ? CalleeEntryCount.getCount() : 0);
+  uint64_t CalleeEntryCountV = (CalleeEntryCount ? *CalleeEntryCount : 0);
 
   bool AnyInline = false;
   for (User *User : Users) {
@@ -1434,8 +1433,7 @@ bool PartialInlinerImpl::tryPartialInline(FunctionCloner &Cloner) {
   if (AnyInline) {
     Cloner.IsFunctionInlined = true;
     if (CalleeEntryCount)
-      Cloner.OrigFunc->setEntryCount(
-          CalleeEntryCount.setCount(CalleeEntryCountV));
+      Cloner.OrigFunc->setEntryCount(CalleeEntryCountV);
     auto &ORE = (*GetORE)(*Cloner.OrigFunc);
     ORE.emit([&]() {
       return OptimizationRemark(DEBUG_TYPE, "PartiallyInlined", Cloner.OrigFunc)

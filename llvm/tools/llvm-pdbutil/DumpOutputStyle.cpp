@@ -90,13 +90,7 @@ Error DumpOutputStyle::dump() {
     P.NewLine();
   }
 
-  if (opts::dump::DumpNamedStreams) {
-    if (auto EC = dumpNamedStreams())
-      return EC;
-    P.NewLine();
-  }
-
-  if (opts::dump::DumpStringTable || opts::dump::DumpStringTableDetails) {
+  if (opts::dump::DumpStringTable) {
     if (auto EC = dumpStringTable())
       return EC;
     P.NewLine();
@@ -854,7 +848,14 @@ Error DumpOutputStyle::dumpXme() {
   return Error::success();
 }
 
-Error DumpOutputStyle::dumpStringTableFromPdb() {
+Error DumpOutputStyle::dumpStringTable() {
+  printHeader(P, "String Table");
+
+  if (File.isObj()) {
+    P.formatLine("Dumping string table is not supported for object files");
+    return Error::success();
+  }
+
   AutoIndent Indent(P);
   auto IS = getPdb().getStringTable();
   if (!IS) {
@@ -863,119 +864,35 @@ Error DumpOutputStyle::dumpStringTableFromPdb() {
     return Error::success();
   }
 
-  if (opts::dump::DumpStringTable) {
-    if (IS->name_ids().empty())
-      P.formatLine("Empty");
-    else {
-      auto MaxID =
-          std::max_element(IS->name_ids().begin(), IS->name_ids().end());
-      uint32_t Digits = NumDigits(*MaxID);
-
-      P.formatLine("{0} | {1}", fmt_align("ID", AlignStyle::Right, Digits),
-                   "String");
-
-      std::vector<uint32_t> SortedIDs(IS->name_ids().begin(),
-                                      IS->name_ids().end());
-      llvm::sort(SortedIDs.begin(), SortedIDs.end());
-      for (uint32_t I : SortedIDs) {
-        auto ES = IS->getStringForID(I);
-        llvm::SmallString<32> Str;
-        if (!ES) {
-          consumeError(ES.takeError());
-          Str = "Error reading string";
-        } else if (!ES->empty()) {
-          Str.append("'");
-          Str.append(*ES);
-          Str.append("'");
-        }
-
-        if (!Str.empty())
-          P.formatLine("{0} | {1}", fmt_align(I, AlignStyle::Right, Digits),
-                       Str);
-      }
-    }
-  }
-
-  if (opts::dump::DumpStringTableDetails) {
-    P.NewLine();
-    {
-      P.printLine("String Table Header:");
-      AutoIndent Indent(P);
-      P.formatLine("Signature: {0}", IS->getSignature());
-      P.formatLine("Hash Version: {0}", IS->getHashVersion());
-      P.formatLine("Name Buffer Size: {0}", IS->getByteSize());
-      P.NewLine();
-    }
-
-    BinaryStreamRef NameBuffer = IS->getStringTable().getBuffer();
-    ArrayRef<uint8_t> Contents;
-    cantFail(NameBuffer.readBytes(0, NameBuffer.getLength(), Contents));
-    P.formatBinary("Name Buffer", Contents, 0);
-    P.NewLine();
-    {
-      P.printLine("Hash Table:");
-      AutoIndent Indent(P);
-      P.formatLine("Bucket Count: {0}", IS->name_ids().size());
-      for (const auto &Entry : enumerate(IS->name_ids()))
-        P.formatLine("Bucket[{0}] : {1}", Entry.index(),
-                     uint32_t(Entry.value()));
-      P.formatLine("Name Count: {0}", IS->getNameCount());
-    }
-  }
-  return Error::success();
-}
-
-Error DumpOutputStyle::dumpStringTableFromObj() {
-  iterateModuleSubsections<DebugStringTableSubsectionRef>(
-      File, PrintScope{P, 4},
-      [&](uint32_t Modi, const SymbolGroup &Strings,
-          DebugStringTableSubsectionRef &Strings2) {
-        BinaryStreamRef StringTableBuffer = Strings2.getBuffer();
-        BinaryStreamReader Reader(StringTableBuffer);
-        while (Reader.bytesRemaining() > 0) {
-          StringRef Str;
-          uint32_t Offset = Reader.getOffset();
-          cantFail(Reader.readCString(Str));
-          if (Str.empty())
-            continue;
-
-          P.formatLine("{0} | {1}", fmt_align(Offset, AlignStyle::Right, 4),
-                       Str);
-        }
-      });
-  return Error::success();
-}
-
-Error DumpOutputStyle::dumpNamedStreams() {
-  printHeader(P, "Named Streams");
-  AutoIndent Indent(P, 2);
-
-  if (File.isObj()) {
-    P.formatLine("Dumping Named Streams is only supported for PDB files.");
+  if (IS->name_ids().empty()) {
+    P.formatLine("Empty");
     return Error::success();
   }
-  ExitOnError Err("Invalid PDB File: ");
 
-  auto &IS = Err(File.pdb().getPDBInfoStream());
-  const NamedStreamMap &NS = IS.getNamedStreams();
-  for (const auto &Entry : NS.entries()) {
-    P.printLine(Entry.getKey());
-    AutoIndent Indent2(P, 2);
-    P.formatLine("Index: {0}", Entry.getValue());
-    P.formatLine("Size in bytes: {0}",
-                 File.pdb().getStreamByteSize(Entry.getValue()));
+  auto MaxID = std::max_element(IS->name_ids().begin(), IS->name_ids().end());
+  uint32_t Digits = NumDigits(*MaxID);
+
+  P.formatLine("{0} | {1}", fmt_align("ID", AlignStyle::Right, Digits),
+               "String");
+
+  std::vector<uint32_t> SortedIDs(IS->name_ids().begin(), IS->name_ids().end());
+  std::sort(SortedIDs.begin(), SortedIDs.end());
+  for (uint32_t I : SortedIDs) {
+    auto ES = IS->getStringForID(I);
+    llvm::SmallString<32> Str;
+    if (!ES) {
+      consumeError(ES.takeError());
+      Str = "Error reading string";
+    } else if (!ES->empty()) {
+      Str.append("'");
+      Str.append(*ES);
+      Str.append("'");
+    }
+
+    if (!Str.empty())
+      P.formatLine("{0} | {1}", fmt_align(I, AlignStyle::Right, Digits), Str);
   }
-
   return Error::success();
-}
-
-Error DumpOutputStyle::dumpStringTable() {
-  printHeader(P, "String Table");
-
-  if (File.isPdb())
-    return dumpStringTableFromPdb();
-
-  return dumpStringTableFromObj();
 }
 
 static void buildDepSet(LazyRandomTypeCollection &Types,
@@ -1058,15 +975,8 @@ Error DumpOutputStyle::dumpTypesFromObjectFile() {
     if (auto EC = S.getName(SectionName))
       return errorCodeToError(EC);
 
-    // .debug$T is a standard CodeView type section, while .debug$P is the same
-    // format but used for MSVC precompiled header object files.
-    if (SectionName == ".debug$T")
-      printHeader(P, "Types (.debug$T)");
-    else if (SectionName == ".debug$P")
-      printHeader(P, "Precompiled Types (.debug$P)");
-    else
+    if (SectionName != ".debug$T")
       continue;
-
     StringRef Contents;
     if (auto EC = S.getContents(Contents))
       return errorCodeToError(EC);
@@ -1214,7 +1124,6 @@ Error DumpOutputStyle::dumpModuleSymsForObj() {
       File, PrintScope{P, 2},
       [&](uint32_t Modi, const SymbolGroup &Strings,
           DebugSymbolsSubsectionRef &Symbols) {
-        Dumper.setSymbolGroup(&Strings);
         for (auto Symbol : Symbols) {
           if (auto EC = Visitor.visitSymbolRecord(Symbol)) {
             SymbolError = llvm::make_unique<Error>(std::move(EC));
@@ -1256,8 +1165,8 @@ Error DumpOutputStyle::dumpModuleSymsForPdb() {
 
         SymbolVisitorCallbackPipeline Pipeline;
         SymbolDeserializer Deserializer(nullptr, CodeViewContainer::Pdb);
-        MinimalSymbolDumper Dumper(P, opts::dump::DumpSymRecordBytes, Strings,
-                                   Ids, Types);
+        MinimalSymbolDumper Dumper(P, opts::dump::DumpSymRecordBytes, Ids,
+                                   Types);
 
         Pipeline.addCallbackToPipeline(Deserializer);
         Pipeline.addCallbackToPipeline(Dumper);

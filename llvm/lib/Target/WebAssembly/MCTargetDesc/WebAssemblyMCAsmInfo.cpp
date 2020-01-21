@@ -43,6 +43,9 @@ WebAssemblyMCAsmInfoELF::WebAssemblyMCAsmInfoELF(const Triple &T) {
 
   SupportsDebugInformation = true;
 
+  // For now, WebAssembly does not support exceptions.
+  ExceptionsType = ExceptionHandling::None;
+
   // TODO: UseIntegratedAssembler?
 
   // WebAssembly's stack is never executable.
@@ -72,6 +75,9 @@ WebAssemblyMCAsmInfo::WebAssemblyMCAsmInfo(const Triple &T) {
   LCOMMDirectiveAlignmentType = LCOMM::Log2Alignment;
 
   SupportsDebugInformation = true;
+
+  // For now, WebAssembly does not support exceptions.
+  ExceptionsType = ExceptionHandling::None;
 
   // TODO: UseIntegratedAssembler?
 }

@@ -637,7 +637,7 @@ static bool unswitchTrivialSwitch(Loop &L, SwitchInst &SI, DominatorTree &DT,
     BranchInst::Create(CommonSuccBB, BB);
   }
 
-  assert(DT.verify(DominatorTree::VerificationLevel::Fast));
+  DT.verifyDomTree();
   ++NumTrivial;
   ++NumSwitches;
   return true;
@@ -2079,9 +2079,11 @@ PreservedAnalyses SimpleLoopUnswitchPass::run(Loop &L, LoopAnalysisManager &AM,
                     NonTrivialUnswitchCB))
     return PreservedAnalyses::all();
 
+#ifndef NDEBUG
   // Historically this pass has had issues with the dominator tree so verify it
   // in asserts builds.
-  assert(AR.DT.verify(DominatorTree::VerificationLevel::Fast));
+  AR.DT.verifyDomTree();
+#endif
   return getLoopPassPreservedAnalyses();
 }
 
@@ -2145,10 +2147,11 @@ bool SimpleLoopUnswitchLegacyPass::runOnLoop(Loop *L, LPPassManager &LPM) {
   // loop.
   LPM.deleteSimpleAnalysisLoop(L);
 
+#ifndef NDEBUG
   // Historically this pass has had issues with the dominator tree so verify it
   // in asserts builds.
-  assert(DT.verify(DominatorTree::VerificationLevel::Fast));
-
+  DT.verifyDomTree();
+#endif
   return Changed;
 }
 

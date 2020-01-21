@@ -24,12 +24,10 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/BranchProbabilityInfo.h"
-#include "llvm/Analysis/InlineCost.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
-#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
@@ -63,7 +61,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
-#include "llvm/Transforms/Utils/Cloning.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -89,13 +87,6 @@ STATISTIC(NumUnsafeByValArguments, "Number of unsafe byval arguments");
 STATISTIC(NumUnsafeStackRestorePoints, "Number of setjmps and landingpads");
 
 } // namespace llvm
-
-/// Use __safestack_pointer_address even if the platform has a faster way of
-/// access safe stack pointer.
-static cl::opt<bool>
-    SafeStackUsePointerAddress("safestack-use-pointer-address",
-                                  cl::init(false), cl::Hidden);
-
 
 namespace {
 
@@ -199,9 +190,6 @@ class SafeStack {
                           const Value *AllocaPtr, uint64_t AllocaSize);
   bool IsAccessSafe(Value *Addr, uint64_t Size, const Value *AllocaPtr,
                     uint64_t AllocaSize);
-
-  bool ShouldInlinePointerAddress(CallSite &CS);
-  void TryInlinePointerAddress();
 
 public:
   SafeStack(Function &F, const TargetLoweringBase &TL, const DataLayout &DL,
@@ -557,7 +545,6 @@ Value *SafeStack::moveStaticAllocasToUnsafeStack(
 
   for (Argument *Arg : ByValArguments) {
     unsigned Offset = SSL.getObjectOffset(Arg);
-    unsigned Align = SSL.getObjectAlignment(Arg);
     Type *Ty = Arg->getType()->getPointerElementType();
 
     uint64_t Size = DL.getTypeStoreSize(Ty);
@@ -574,7 +561,7 @@ Value *SafeStack::moveStaticAllocasToUnsafeStack(
                       DIExpression::NoDeref, -Offset, DIExpression::NoDeref);
     Arg->replaceAllUsesWith(NewArg);
     IRB.SetInsertPoint(cast<Instruction>(NewArg)->getNextNode());
-    IRB.CreateMemCpy(Off, Align, Arg, Arg->getParamAlignment(), Size);
+    IRB.CreateMemCpy(Off, Arg, Size, Arg->getParamAlignment());
   }
 
   // Allocate space for every unsafe static AllocaInst on the unsafe stack.
@@ -708,35 +695,6 @@ void SafeStack::moveDynamicAllocasToUnsafeStack(
   }
 }
 
-bool SafeStack::ShouldInlinePointerAddress(CallSite &CS) {
-  Function *Callee = CS.getCalledFunction();
-  if (CS.hasFnAttr(Attribute::AlwaysInline) && isInlineViable(*Callee))
-    return true;
-  if (Callee->isInterposable() || Callee->hasFnAttribute(Attribute::NoInline) ||
-      CS.isNoInline())
-    return false;
-  return true;
-}
-
-void SafeStack::TryInlinePointerAddress() {
-  if (!isa<CallInst>(UnsafeStackPtr))
-    return;
-
-  if(F.hasFnAttribute(Attribute::OptimizeNone))
-    return;
-
-  CallSite CS(UnsafeStackPtr);
-  Function *Callee = CS.getCalledFunction();
-  if (!Callee || Callee->isDeclaration())
-    return;
-
-  if (!ShouldInlinePointerAddress(CS))
-    return;
-
-  InlineFunctionInfo IFI;
-  InlineFunction(CS, IFI);
-}
-
 bool SafeStack::run() {
   assert(F.hasFnAttribute(Attribute::SafeStack) &&
          "Can't run SafeStack on a function without the attribute");
@@ -773,13 +731,7 @@ bool SafeStack::run() {
     ++NumUnsafeStackRestorePointsFunctions;
 
   IRBuilder<> IRB(&F.front(), F.begin()->getFirstInsertionPt());
-  if (SafeStackUsePointerAddress) {
-    Value *Fn = F.getParent()->getOrInsertFunction(
-        "__safestack_pointer_address", StackPtrTy->getPointerTo(0));
-    UnsafeStackPtr = IRB.CreateCall(Fn);
-  } else {
-    UnsafeStackPtr = TL.getSafeStackPointerLocation(IRB);
-  }
+  UnsafeStackPtr = TL.getSafeStackPointerLocation(IRB);
 
   // Load the current stack pointer (we'll also use it as a base pointer).
   // FIXME: use a dedicated register for it ?
@@ -826,8 +778,6 @@ bool SafeStack::run() {
     IRB.SetInsertPoint(RI);
     IRB.CreateStore(BasePointer, UnsafeStackPtr);
   }
-
-  TryInlinePointerAddress();
 
   DEBUG(dbgs() << "[SafeStack]     safestack applied\n");
   return true;

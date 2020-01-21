@@ -51,9 +51,6 @@ public:
 } // End anonymous namespace
 
 char LowerGlobalDtors::ID = 0;
-INITIALIZE_PASS(LowerGlobalDtors, DEBUG_TYPE,
-                "Lower @llvm.global_dtors for WebAssembly", false, false)
-
 ModulePass *llvm::createWebAssemblyLowerGlobalDtors() {
   return new LowerGlobalDtors();
 }

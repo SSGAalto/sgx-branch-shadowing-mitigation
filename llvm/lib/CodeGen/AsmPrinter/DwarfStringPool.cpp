@@ -40,7 +40,7 @@ DwarfStringPool::EntryRef DwarfStringPool::getEntry(AsmPrinter &Asm,
 }
 
 void DwarfStringPool::emit(AsmPrinter &Asm, MCSection *StrSection,
-                           MCSection *OffsetSection, bool UseRelativeOffsets) {
+                           MCSection *OffsetSection) {
   if (Pool.empty())
     return;
 
@@ -74,9 +74,6 @@ void DwarfStringPool::emit(AsmPrinter &Asm, MCSection *StrSection,
     Asm.OutStreamer->SwitchSection(OffsetSection);
     unsigned size = 4; // FIXME: DWARF64 is 8.
     for (const auto &Entry : Entries)
-      if (UseRelativeOffsets)
-        Asm.emitDwarfStringOffset(Entry->getValue());
-      else
-        Asm.OutStreamer->EmitIntValue(Entry->getValue().Offset, size);
+      Asm.OutStreamer->EmitIntValue(Entry->getValue().Offset, size);
   }
 }

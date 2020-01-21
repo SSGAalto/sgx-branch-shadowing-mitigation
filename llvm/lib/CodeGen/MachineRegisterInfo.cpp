@@ -65,64 +65,21 @@ void MachineRegisterInfo::setRegBank(unsigned Reg,
   VRegInfo[Reg].first = &RegBank;
 }
 
-static const TargetRegisterClass *
-constrainRegClass(MachineRegisterInfo &MRI, unsigned Reg,
-                  const TargetRegisterClass *OldRC,
-                  const TargetRegisterClass *RC, unsigned MinNumRegs) {
-  if (OldRC == RC)
-    return RC;
-  const TargetRegisterClass *NewRC =
-      MRI.getTargetRegisterInfo()->getCommonSubClass(OldRC, RC);
-  if (!NewRC || NewRC == OldRC)
-    return NewRC;
-  if (NewRC->getNumRegs() < MinNumRegs)
-    return nullptr;
-  MRI.setRegClass(Reg, NewRC);
-  return NewRC;
-}
-
 const TargetRegisterClass *
 MachineRegisterInfo::constrainRegClass(unsigned Reg,
                                        const TargetRegisterClass *RC,
                                        unsigned MinNumRegs) {
-  return ::constrainRegClass(*this, Reg, getRegClass(Reg), RC, MinNumRegs);
-}
-
-bool
-MachineRegisterInfo::constrainRegAttrs(unsigned Reg,
-                                       unsigned ConstrainingReg,
-                                       unsigned MinNumRegs) {
-  auto const *OldRC = getRegClassOrNull(Reg);
-  auto const *RC = getRegClassOrNull(ConstrainingReg);
-  // A virtual register at any point must have either a low-level type
-  // or a class assigned, but not both. The only exception is the internals of
-  // GlobalISel's instruction selection pass, which is allowed to temporarily
-  // introduce registers with types and classes both.
-  assert((OldRC || getType(Reg).isValid()) && "Reg has neither class nor type");
-  assert((!OldRC || !getType(Reg).isValid()) && "Reg has class and type both");
-  assert((RC || getType(ConstrainingReg).isValid()) &&
-         "ConstrainingReg has neither class nor type");
-  assert((!RC || !getType(ConstrainingReg).isValid()) &&
-         "ConstrainingReg has class and type both");
-  if (OldRC && RC)
-    return ::constrainRegClass(*this, Reg, OldRC, RC, MinNumRegs);
-  // If one of the virtual registers is generic (used in generic machine
-  // instructions, has a low-level type, doesn't have a class), and the other is
-  // concrete (used in target specific instructions, doesn't have a low-level
-  // type, has a class), we can not unify them.
-  if (OldRC || RC)
-    return false;
-  // At this point, both registers are guaranteed to have a valid low-level
-  // type, and they must agree.
-  if (getType(Reg) != getType(ConstrainingReg))
-    return false;
-  auto const *OldRB = getRegBankOrNull(Reg);
-  auto const *RB = getRegBankOrNull(ConstrainingReg);
-  if (OldRB)
-    return !RB || RB == OldRB;
-  if (RB)
-    setRegBank(Reg, *RB);
-  return true;
+  const TargetRegisterClass *OldRC = getRegClass(Reg);
+  if (OldRC == RC)
+    return RC;
+  const TargetRegisterClass *NewRC =
+    getTargetRegisterInfo()->getCommonSubClass(OldRC, RC);
+  if (!NewRC || NewRC == OldRC)
+    return NewRC;
+  if (NewRC->getNumRegs() < MinNumRegs)
+    return nullptr;
+  setRegClass(Reg, NewRC);
+  return NewRC;
 }
 
 bool
@@ -150,11 +107,10 @@ MachineRegisterInfo::recomputeRegClass(unsigned Reg) {
   return true;
 }
 
-unsigned MachineRegisterInfo::createIncompleteVirtualRegister(StringRef Name) {
+unsigned MachineRegisterInfo::createIncompleteVirtualRegister() {
   unsigned Reg = TargetRegisterInfo::index2VirtReg(getNumVirtRegs());
   VRegInfo.grow(Reg);
   RegAllocHints.grow(Reg);
-  insertVRegByName(Name, Reg);
   return Reg;
 }
 
@@ -162,14 +118,13 @@ unsigned MachineRegisterInfo::createIncompleteVirtualRegister(StringRef Name) {
 /// function with the specified register class.
 ///
 unsigned
-MachineRegisterInfo::createVirtualRegister(const TargetRegisterClass *RegClass,
-                                           StringRef Name) {
+MachineRegisterInfo::createVirtualRegister(const TargetRegisterClass *RegClass){
   assert(RegClass && "Cannot create register without RegClass!");
   assert(RegClass->isAllocatable() &&
          "Virtual register RegClass must be allocatable.");
 
   // New virtual register number.
-  unsigned Reg = createIncompleteVirtualRegister(Name);
+  unsigned Reg = createIncompleteVirtualRegister();
   VRegInfo[Reg].first = RegClass;
   if (TheDelegate)
     TheDelegate->MRI_NoteNewVirtualRegister(Reg);
@@ -190,9 +145,9 @@ void MachineRegisterInfo::setType(unsigned VReg, LLT Ty) {
 }
 
 unsigned
-MachineRegisterInfo::createGenericVirtualRegister(LLT Ty, StringRef Name) {
+MachineRegisterInfo::createGenericVirtualRegister(LLT Ty) {
   // New virtual register number.
-  unsigned Reg = createIncompleteVirtualRegister(Name);
+  unsigned Reg = createIncompleteVirtualRegister();
   // FIXME: Should we use a dummy register class?
   VRegInfo[Reg].first = static_cast<RegisterBank *>(nullptr);
   getVRegToType()[Reg] = Ty;

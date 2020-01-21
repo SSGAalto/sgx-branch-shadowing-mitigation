@@ -9,7 +9,6 @@
 
 #include "llvm/Support/LockFileManager.h"
 #include "llvm/ADT/None.h"
-#include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/Errc.h"
@@ -122,6 +121,27 @@ bool LockFileManager::processStillExecuting(StringRef HostID, int PID) {
   return true;
 }
 
+namespace {
+
+/// An RAII helper object for cleanups.
+class RAIICleanup {
+  std::function<void()> Fn;
+  bool Canceled = false;
+
+public:
+  RAIICleanup(std::function<void()> Fn) : Fn(Fn) {}
+
+  ~RAIICleanup() {
+    if (Canceled)
+      return;
+    Fn();
+  }
+
+  void cancel() { Canceled = true; }
+};
+
+} // end anonymous namespace
+
 LockFileManager::LockFileManager(StringRef FileName)
 {
   this->FileName = FileName;
@@ -152,7 +172,7 @@ LockFileManager::LockFileManager(StringRef FileName)
   UniqueLockFile = std::move(*Temp);
 
   // Make sure we discard the temporary file on exit.
-  auto RemoveTempFile = llvm::make_scope_exit([&]() {
+  RAIICleanup RemoveTempFile([&]() {
     if (Error E = UniqueLockFile->discard())
       setError(errorToErrorCode(std::move(E)));
   });
@@ -189,7 +209,7 @@ LockFileManager::LockFileManager(StringRef FileName)
     std::error_code EC =
         sys::fs::create_link(UniqueLockFile->TmpName, LockFileName);
     if (!EC) {
-      RemoveTempFile.release();
+      RemoveTempFile.cancel();
       return;
     }
 

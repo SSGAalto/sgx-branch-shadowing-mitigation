@@ -16,10 +16,8 @@
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/BasicAliasAnalysis.h"
 #include "llvm/Analysis/GlobalsModRef.h"
-#include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/LoopPass.h"
-#include "llvm/Analysis/MustExecute.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionAliasAnalysis.h"
 #include "llvm/Analysis/ScalarEvolutionExpander.h"
@@ -923,13 +921,13 @@ bool InductionDescriptor::isFPInductionPHI(PHINode *Phi, const Loop *TheLoop,
 }
 
 /// This function is called when we suspect that the update-chain of a phi node
-/// (whose symbolic SCEV expression sin \p PhiScev) contains redundant casts,
-/// that can be ignored. (This can happen when the PSCEV rewriter adds a runtime
-/// predicate P under which the SCEV expression for the phi can be the
-/// AddRecurrence \p AR; See createAddRecFromPHIWithCast). We want to find the
-/// cast instructions that are involved in the update-chain of this induction.
-/// A caller that adds the required runtime predicate can be free to drop these
-/// cast instructions, and compute the phi using \p AR (instead of some scev
+/// (whose symbolic SCEV expression sin \p PhiScev) contains redundant casts, 
+/// that can be ignored. (This can happen when the PSCEV rewriter adds a runtime 
+/// predicate P under which the SCEV expression for the phi can be the 
+/// AddRecurrence \p AR; See createAddRecFromPHIWithCast). We want to find the 
+/// cast instructions that are involved in the update-chain of this induction. 
+/// A caller that adds the required runtime predicate can be free to drop these 
+/// cast instructions, and compute the phi using \p AR (instead of some scev 
 /// expression with casts).
 ///
 /// For example, without a predicate the scev expression can take the following
@@ -964,7 +962,7 @@ static bool getCastsForInductionPHI(PredicatedScalarEvolution &PSE,
   assert(PSE.getSCEV(PN) == AR && "Unexpected phi node SCEV expression");
   const Loop *L = AR->getLoop();
 
-  // Find any cast instructions that participate in the def-use chain of
+  // Find any cast instructions that participate in the def-use chain of 
   // PhiScev in the loop.
   // FORNOW/TODO: We currently expect the def-use chain to include only
   // two-operand instructions, where one of the operands is an invariant.
@@ -1430,32 +1428,6 @@ void llvm::deleteDeadLoop(Loop *L, DominatorTree *DT = nullptr,
     DT->deleteEdge(Preheader, L->getHeader());
   }
 
-  // Given LCSSA form is satisfied, we should not have users of instructions
-  // within the dead loop outside of the loop. However, LCSSA doesn't take
-  // unreachable uses into account. We handle them here.
-  // We could do it after drop all references (in this case all users in the
-  // loop will be already eliminated and we have less work to do but according
-  // to API doc of User::dropAllReferences only valid operation after dropping
-  // references, is deletion. So let's substitute all usages of
-  // instruction from the loop with undef value of corresponding type first.
-  for (auto *Block : L->blocks())
-    for (Instruction &I : *Block) {
-      auto *Undef = UndefValue::get(I.getType());
-      for (Value::use_iterator UI = I.use_begin(), E = I.use_end(); UI != E;) {
-        Use &U = *UI;
-        ++UI;
-        if (auto *Usr = dyn_cast<Instruction>(U.getUser()))
-          if (L->contains(Usr->getParent()))
-            continue;
-        // If we have a DT then we can check that uses outside a loop only in
-        // unreachable block.
-        if (DT)
-          assert(!DT->isReachableFromEntry(U) &&
-                 "Unexpected user in reachable block");
-        U.set(Undef);
-      }
-    }
-
   // Remove the block from the reference counting scheme, so that we can
   // delete it freely later.
   for (auto *Block : L->blocks())
@@ -1483,12 +1455,54 @@ void llvm::deleteDeadLoop(Loop *L, DominatorTree *DT = nullptr,
   }
 }
 
+/// Returns true if the instruction in a loop is guaranteed to execute at least
+/// once.
+bool llvm::isGuaranteedToExecute(const Instruction &Inst,
+                                 const DominatorTree *DT, const Loop *CurLoop,
+                                 const LoopSafetyInfo *SafetyInfo) {
+  // We have to check to make sure that the instruction dominates all
+  // of the exit blocks.  If it doesn't, then there is a path out of the loop
+  // which does not execute this instruction, so we can't hoist it.
+
+  // If the instruction is in the header block for the loop (which is very
+  // common), it is always guaranteed to dominate the exit blocks.  Since this
+  // is a common case, and can save some work, check it now.
+  if (Inst.getParent() == CurLoop->getHeader())
+    // If there's a throw in the header block, we can't guarantee we'll reach
+    // Inst.
+    return !SafetyInfo->HeaderMayThrow;
+
+  // Somewhere in this loop there is an instruction which may throw and make us
+  // exit the loop.
+  if (SafetyInfo->MayThrow)
+    return false;
+
+  // Get the exit blocks for the current loop.
+  SmallVector<BasicBlock *, 8> ExitBlocks;
+  CurLoop->getExitBlocks(ExitBlocks);
+
+  // Verify that the block dominates each of the exit blocks of the loop.
+  for (BasicBlock *ExitBlock : ExitBlocks)
+    if (!DT->dominates(Inst.getParent(), ExitBlock))
+      return false;
+
+  // As a degenerate case, if the loop is statically infinite then we haven't
+  // proven anything since there are no exit blocks.
+  if (ExitBlocks.empty())
+    return false;
+
+  // FIXME: In general, we have to prove that the loop isn't an infinite loop.
+  // See http::llvm.org/PR24078 .  (The "ExitBlocks.empty()" check above is
+  // just a special case of this.)
+  return true;
+}
+
 Optional<unsigned> llvm::getLoopEstimatedTripCount(Loop *L) {
   // Only support loops with a unique exiting block, and a latch.
   if (!L->getExitingBlock())
     return None;
 
-  // Get the branch weights for the loop's backedge.
+  // Get the branch weights for the the loop's backedge.
   BranchInst *LatchBR =
       dyn_cast<BranchInst>(L->getLoopLatch()->getTerminator());
   if (!LatchBR || LatchBR->getNumSuccessors() != 2)
@@ -1524,38 +1538,6 @@ static Value *addFastMathFlag(Value *V) {
     cast<Instruction>(V)->setFastMathFlags(Flags);
   }
   return V;
-}
-
-// Helper to generate an ordered reduction.
-Value *
-llvm::getOrderedReduction(IRBuilder<> &Builder, Value *Acc, Value *Src,
-                          unsigned Op,
-                          RecurrenceDescriptor::MinMaxRecurrenceKind MinMaxKind,
-                          ArrayRef<Value *> RedOps) {
-  unsigned VF = Src->getType()->getVectorNumElements();
-
-  // Extract and apply reduction ops in ascending order:
-  // e.g. ((((Acc + Scl[0]) + Scl[1]) + Scl[2]) + ) ... + Scl[VF-1]
-  Value *Result = Acc;
-  for (unsigned ExtractIdx = 0; ExtractIdx != VF; ++ExtractIdx) {
-    Value *Ext =
-        Builder.CreateExtractElement(Src, Builder.getInt32(ExtractIdx));
-
-    if (Op != Instruction::ICmp && Op != Instruction::FCmp) {
-      Result = Builder.CreateBinOp((Instruction::BinaryOps)Op, Result, Ext,
-                                   "bin.rdx");
-    } else {
-      assert(MinMaxKind != RecurrenceDescriptor::MRK_Invalid &&
-             "Invalid min/max");
-      Result = RecurrenceDescriptor::createMinMaxOp(Builder, MinMaxKind, Result,
-                                                    Ext);
-    }
-
-    if (!RedOps.empty())
-      propagateIRFlags(Result, RedOps);
-  }
-
-  return Result;
 }
 
 // Helper to generate a log2 shuffle reduction.

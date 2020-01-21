@@ -26,30 +26,30 @@
 ; ASM: # %bb.0:                                 # %entry
 ; ASM:         pushq   %rsi
 ; ASM:         subq    $32, %rsp
-; ASM:         #DEBUG_VALUE: f:p <- $ecx
+; ASM:         #DEBUG_VALUE: f:p <- %ecx
 ; ASM:         movl    %ecx, %esi
 ; ASM: [[p_ecx_esi:\.Ltmp.*]]:
-; ASM:         #DEBUG_VALUE: f:p <- $esi
+; ASM:         #DEBUG_VALUE: f:p <- %esi
 ; ASM:         callq   getint
 ; ASM: [[after_getint:\.Ltmp.*]]:
-; ASM:         #DEBUG_VALUE: a <- $eax
-; ASM:         #DEBUG_VALUE: inlineinc:a <- $eax
-; ASM:         #DEBUG_VALUE: c <- $eax
+; ASM:         #DEBUG_VALUE: a <- %eax
+; ASM:         #DEBUG_VALUE: inlineinc:a <- %eax
+; ASM:         #DEBUG_VALUE: c <- %eax
 ; ASM:         testl   %esi, %esi
 ; ASM:         je      .LBB0_2
 ; ASM: [[after_je:\.Ltmp.*]]:
 ; ASM: # %bb.1:                                 # %if.then
-; ASM-DAG:     #DEBUG_VALUE: inlineinc:a <- $eax
-; ASM-DAG:     #DEBUG_VALUE: a <- $eax
-; ASM-DAG:     #DEBUG_VALUE: f:p <- $esi
+; ASM-DAG:     #DEBUG_VALUE: inlineinc:a <- %eax
+; ASM-DAG:     #DEBUG_VALUE: a <- %eax
+; ASM-DAG:     #DEBUG_VALUE: f:p <- %esi
 ; ASM:         addl    $1, %eax
 ; ASM: [[after_inc_eax:\.Ltmp.*]]:
-; ASM:         #DEBUG_VALUE: inlineinc:b <- $eax
-; ASM:         #DEBUG_VALUE: b <- $eax
+; ASM:         #DEBUG_VALUE: inlineinc:b <- %eax
+; ASM:         #DEBUG_VALUE: b <- %eax
 ; ASM:         addl    $1, x(%rip)
 ; ASM: [[after_if:\.Ltmp.*]]:
 ; ASM: .LBB0_2:                                # %if.else
-; ASM:         #DEBUG_VALUE: f:p <- $esi
+; ASM:         #DEBUG_VALUE: f:p <- %esi
 ; ASM:         movl    %eax, %ecx
 ; ASM:         addq    $32, %rsp
 ; ASM:         popq    %rsi
@@ -61,11 +61,11 @@
 ; ASM:         .cv_def_range    .Lfunc_begin0 [[p_ecx_esi]], "A\021\022\000\000\000"
 ; ASM:         .cv_def_range    [[p_ecx_esi]] [[func_end]], "A\021\027\000\000\000"
 ; ASM:         .short  4414                    # Record kind: S_LOCAL
-; ASM:         .asciz  "c"
-; ASM:         .cv_def_range    [[after_getint]] [[after_je]], "A\021\021\000\000\000"
-; ASM:         .short  4414                    # Record kind: S_LOCAL
 ; ASM:         .asciz  "a"
 ; ASM:         .cv_def_range    [[after_getint]] [[after_inc_eax]], "A\021\021\000\000\000"
+; ASM:         .short  4414                    # Record kind: S_LOCAL
+; ASM:         .asciz  "c"
+; ASM:         .cv_def_range    [[after_getint]] [[after_je]], "A\021\021\000\000\000"
 ; ASM:         .short  4414                    # Record kind: S_LOCAL
 ; ASM:         .asciz  "b"
 ; ASM:         .cv_def_range    [[after_inc_eax]] [[after_if]], "A\021\021\000\000\000"
@@ -111,20 +111,6 @@
 ; OBJ:     Type: int (0x74)
 ; OBJ:     Flags [ (0x0)
 ; OBJ:     ]
-; OBJ:     VarName: c
-; OBJ:   }
-; OBJ:   DefRangeRegisterSym {
-; OBJ:     Register: EAX (0x11)
-; OBJ:     LocalVariableAddrRange {
-; OBJ:       OffsetStart: .text+0xC
-; OBJ:       ISectStart: 0x0
-; OBJ:       Range: 0x4
-; OBJ:     }
-; OBJ:   }
-; OBJ:   LocalSym {
-; OBJ:     Type: int (0x74)
-; OBJ:     Flags [ (0x0)
-; OBJ:     ]
 ; OBJ:     VarName: a
 ; OBJ:   }
 ; OBJ:   DefRangeRegisterSym {
@@ -133,6 +119,20 @@
 ; OBJ:       OffsetStart: .text+0xC
 ; OBJ:       ISectStart: 0x0
 ; OBJ:       Range: 0x7
+; OBJ:     }
+; OBJ:   }
+; OBJ:   LocalSym {
+; OBJ:     Type: int (0x74)
+; OBJ:     Flags [ (0x0)
+; OBJ:     ]
+; OBJ:     VarName: c
+; OBJ:   }
+; OBJ:   DefRangeRegisterSym {
+; OBJ:     Register: EAX (0x11)
+; OBJ:     LocalVariableAddrRange {
+; OBJ:       OffsetStart: .text+0xC
+; OBJ:       ISectStart: 0x0
+; OBJ:       Range: 0x4
 ; OBJ:     }
 ; OBJ:   }
 ; OBJ:   LocalSym {

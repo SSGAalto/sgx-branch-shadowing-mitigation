@@ -70,7 +70,7 @@ bool MachineTraceMetrics::runOnMachineFunction(MachineFunction &Func) {
   TRI = ST.getRegisterInfo();
   MRI = &MF->getRegInfo();
   Loops = &getAnalysis<MachineLoopInfo>();
-  SchedModel.init(&ST);
+  SchedModel.init(ST.getSchedModel(), &ST, TII);
   BlockInfo.resize(MF->getNumBlockIDs());
   ProcResourceCycles.resize(MF->getNumBlockIDs() *
                             SchedModel.getNumProcResourceKinds());

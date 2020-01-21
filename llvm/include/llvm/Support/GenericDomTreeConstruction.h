@@ -1241,11 +1241,11 @@ struct SemiNCAInfo {
         Operations[{U.getTo(), U.getFrom()}] = int(i);
     }
 
-    llvm::sort(Result.begin(), Result.end(),
-               [&Operations](const UpdateT &A, const UpdateT &B) {
-                 return Operations[{A.getFrom(), A.getTo()}] >
-                        Operations[{B.getFrom(), B.getTo()}];
-               });
+    std::sort(Result.begin(), Result.end(),
+              [&Operations](const UpdateT &A, const UpdateT &B) {
+                return Operations[{A.getFrom(), A.getTo()}] >
+                       Operations[{B.getFrom(), B.getTo()}];
+              });
   }
 
   static void ApplyNextUpdate(DomTreeT &DT, BatchUpdateInfo &BUI) {
@@ -1277,7 +1277,6 @@ struct SemiNCAInfo {
   // root which is the function's entry node. A PostDominatorTree can have
   // multiple roots - one for each node with no successors and for infinite
   // loops.
-  // Running time: O(N).
   bool verifyRoots(const DomTreeT &DT) {
     if (!DT.Parent && !DT.Roots.empty()) {
       errs() << "Tree has no parent but has roots!\n";
@@ -1318,7 +1317,6 @@ struct SemiNCAInfo {
   }
 
   // Checks if the tree contains all reachable nodes in the input graph.
-  // Running time: O(N).
   bool verifyReachability(const DomTreeT &DT) {
     clear();
     doFullDFSWalk(DT, AlwaysDescend);
@@ -1354,7 +1352,6 @@ struct SemiNCAInfo {
 
   // Check if for every parent with a level L in the tree all of its children
   // have level L + 1.
-  // Running time: O(N).
   static bool VerifyLevels(const DomTreeT &DT) {
     for (auto &NodeToTN : DT.DomTreeNodes) {
       const TreeNodePtr TN = NodeToTN.second.get();
@@ -1386,7 +1383,6 @@ struct SemiNCAInfo {
 
   // Check if the computed DFS numbers are correct. Note that DFS info may not
   // be valid, and when that is the case, we don't verify the numbers.
-  // Running time: O(N log(N)).
   static bool VerifyDFSNumbers(const DomTreeT &DT) {
     if (!DT.DFSInfoValid || !DT.Parent)
       return true;
@@ -1430,10 +1426,10 @@ struct SemiNCAInfo {
       // Make a copy and sort it such that it is possible to check if there are
       // no gaps between DFS numbers of adjacent children.
       SmallVector<TreeNodePtr, 8> Children(Node->begin(), Node->end());
-      llvm::sort(Children.begin(), Children.end(),
-                 [](const TreeNodePtr Ch1, const TreeNodePtr Ch2) {
-                   return Ch1->getDFSNumIn() < Ch2->getDFSNumIn();
-                 });
+      std::sort(Children.begin(), Children.end(),
+                [](const TreeNodePtr Ch1, const TreeNodePtr Ch2) {
+                  return Ch1->getDFSNumIn() < Ch2->getDFSNumIn();
+                });
 
       auto PrintChildrenError = [Node, &Children, PrintNodeAndDFSNums](
           const TreeNodePtr FirstCh, const TreeNodePtr SecondCh) {
@@ -1517,10 +1513,10 @@ struct SemiNCAInfo {
   // linear time, but the algorithms are complex. Instead, we do it in a
   // straightforward N^2 and N^3 way below, using direct path reachability.
 
+
   // Checks if the tree has the parent property: if for all edges from V to W in
   // the input graph, such that V is reachable, the parent of W in the tree is
   // an ancestor of V in the tree.
-  // Running time: O(N^2).
   //
   // This means that if a node gets disconnected from the graph, then all of
   // the nodes it dominated previously will now become unreachable.
@@ -1553,7 +1549,6 @@ struct SemiNCAInfo {
 
   // Check if the tree has sibling property: if a node V does not dominate a
   // node W for all siblings V and W in the tree.
-  // Running time: O(N^3).
   //
   // This means that if a node gets disconnected from the graph, then all of its
   // siblings will now still be reachable.
@@ -1588,31 +1583,6 @@ struct SemiNCAInfo {
 
     return true;
   }
-
-  // Check if the given tree is the same as a freshly computed one for the same
-  // Parent.
-  // Running time: O(N^2), but faster in practise (same as tree construction).
-  //
-  // Note that this does not check if that the tree construction algorithm is
-  // correct and should be only used for fast (but possibly unsound)
-  // verification.
-  static bool IsSameAsFreshTree(const DomTreeT &DT) {
-    DomTreeT FreshTree;
-    FreshTree.recalculate(*DT.Parent);
-    const bool Different = DT.compare(FreshTree);
-
-    if (Different) {
-      errs() << (DT.isPostDominator() ? "Post" : "")
-             << "DominatorTree is different than a freshly computed one!\n"
-             << "\tCurrent:\n";
-      DT.print(errs());
-      errs() << "\n\tFreshly computed tree:\n";
-      FreshTree.print(errs());
-      errs().flush();
-    }
-
-    return !Different;
-  }
 };
 
 template <class DomTreeT>
@@ -1641,29 +1611,11 @@ void ApplyUpdates(DomTreeT &DT,
 }
 
 template <class DomTreeT>
-bool Verify(const DomTreeT &DT, typename DomTreeT::VerificationLevel VL) {
+bool Verify(const DomTreeT &DT) {
   SemiNCAInfo<DomTreeT> SNCA(nullptr);
-
-  // Simplist check is to compare against a new tree. This will also
-  // usefully print the old and new trees, if they are different.
-  if (!SNCA.IsSameAsFreshTree(DT))
-    return false;
-
-  // Common checks to verify the properties of the tree. O(N log N) at worst
-  if (!SNCA.verifyRoots(DT) || !SNCA.verifyReachability(DT) ||
-      !SNCA.VerifyLevels(DT) || !SNCA.VerifyDFSNumbers(DT))
-    return false;
-
-  // Extra checks depending on VerificationLevel. Up to O(N^3)
-  if (VL == DomTreeT::VerificationLevel::Basic ||
-      VL == DomTreeT::VerificationLevel::Full)
-    if (!SNCA.verifyParentProperty(DT))
-      return false;
-  if (VL == DomTreeT::VerificationLevel::Full)
-    if (!SNCA.verifySiblingProperty(DT))
-      return false;
-
-  return true;
+  return SNCA.verifyRoots(DT) && SNCA.verifyReachability(DT) &&
+         SNCA.VerifyLevels(DT) && SNCA.verifyParentProperty(DT) &&
+         SNCA.verifySiblingProperty(DT) && SNCA.VerifyDFSNumbers(DT);
 }
 
 }  // namespace DomTreeBuilder

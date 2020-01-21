@@ -458,16 +458,24 @@ void RegisterBankInfo::applyDefaultMapping(const OperandsMapper &OpdMapper) {
 unsigned RegisterBankInfo::getSizeInBits(unsigned Reg,
                                          const MachineRegisterInfo &MRI,
                                          const TargetRegisterInfo &TRI) const {
+  const TargetRegisterClass *RC = nullptr;
   if (TargetRegisterInfo::isPhysicalRegister(Reg)) {
     // The size is not directly available for physical registers.
     // Instead, we need to access a register class that contains Reg and
     // get the size of that register class.
-    // Because this is expensive, we'll cache the register class by calling
-    auto *RC = &getMinimalPhysRegClass(Reg, TRI);
-    assert(RC && "Expecting Register class");
-    return TRI.getRegSizeInBits(*RC);
+    RC = &getMinimalPhysRegClass(Reg, TRI);
+  } else {
+    LLT Ty = MRI.getType(Reg);
+    unsigned RegSize = Ty.isValid() ? Ty.getSizeInBits() : 0;
+    // If Reg is not a generic register, query the register class to
+    // get its size.
+    if (RegSize)
+      return RegSize;
+    // Since Reg is not a generic register, it must have a register class.
+    RC = MRI.getRegClass(Reg);
   }
-  return TRI.getRegSizeInBits(Reg, MRI);
+  assert(RC && "Unable to deduce the register class");
+  return TRI.getRegSizeInBits(*RC);
 }
 
 //------------------------------------------------------------------------------

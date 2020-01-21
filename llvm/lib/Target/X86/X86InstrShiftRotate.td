@@ -897,7 +897,7 @@ let hasSideEffects = 0 in {
                          // x86memop:$src1
                          ReadDefault, ReadDefault, ReadDefault, ReadDefault,
                          ReadDefault,
-                         // RC:$src2
+                         // RC:$src1
                          ReadAfterLd]>;
 }
 }

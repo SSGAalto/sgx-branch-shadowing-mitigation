@@ -237,7 +237,7 @@ void ReplaceableMetadataImpl::replaceAllUsesWith(Metadata *MD) {
   // Copy out uses since UseMap will get touched below.
   using UseTy = std::pair<void *, std::pair<OwnerTy, uint64_t>>;
   SmallVector<UseTy, 8> Uses(UseMap.begin(), UseMap.end());
-  llvm::sort(Uses.begin(), Uses.end(), [](const UseTy &L, const UseTy &R) {
+  std::sort(Uses.begin(), Uses.end(), [](const UseTy &L, const UseTy &R) {
     return L.second.second < R.second.second;
   });
   for (const auto &Pair : Uses) {
@@ -290,7 +290,7 @@ void ReplaceableMetadataImpl::resolveAllUses(bool ResolveUsers) {
   // Copy out uses since UseMap could get touched below.
   using UseTy = std::pair<void *, std::pair<OwnerTy, uint64_t>>;
   SmallVector<UseTy, 8> Uses(UseMap.begin(), UseMap.end());
-  llvm::sort(Uses.begin(), Uses.end(), [](const UseTy &L, const UseTy &R) {
+  std::sort(Uses.begin(), Uses.end(), [](const UseTy &L, const UseTy &R) {
     return L.second.second < R.second.second;
   });
   UseMap.clear();
@@ -329,20 +329,12 @@ bool ReplaceableMetadataImpl::isReplaceable(const Metadata &MD) {
   return dyn_cast<ValueAsMetadata>(&MD);
 }
 
-static DISubprogram *getLocalFunctionMetadata(Value *V) {
+static Function *getLocalFunction(Value *V) {
   assert(V && "Expected value");
-  if (auto *A = dyn_cast<Argument>(V)) {
-    if (auto *Fn = A->getParent())
-      return Fn->getSubprogram();
-    return nullptr;
-  }
-
-  if (BasicBlock *BB = cast<Instruction>(V)->getParent()) {
-    if (auto *Fn = BB->getParent())
-      return Fn->getSubprogram();
-    return nullptr;
-  }
-
+  if (auto *A = dyn_cast<Argument>(V))
+    return A->getParent();
+  if (BasicBlock *BB = cast<Instruction>(V)->getParent())
+    return BB->getParent();
   return nullptr;
 }
 
@@ -418,9 +410,9 @@ void ValueAsMetadata::handleRAUW(Value *From, Value *To) {
       delete MD;
       return;
     }
-    if (getLocalFunctionMetadata(From) && getLocalFunctionMetadata(To) &&
-        getLocalFunctionMetadata(From) != getLocalFunctionMetadata(To)) {
-      // DISubprogram changed.
+    if (getLocalFunction(From) && getLocalFunction(To) &&
+        getLocalFunction(From) != getLocalFunction(To)) {
+      // Function changed.
       MD->replaceAllUsesWith(nullptr);
       delete MD;
       return;

@@ -112,7 +112,7 @@ bool ProfileSummaryInfo::isFunctionEntryHot(const Function *F) {
   // FIXME: The heuristic used below for determining hotness is based on
   // preliminary SPEC tuning for inliner. This will eventually be a
   // convenience method that calls isHotCount.
-  return FunctionCount && isHotCount(FunctionCount.getCount());
+  return FunctionCount && isHotCount(FunctionCount.getValue());
 }
 
 /// Returns true if the function contains hot code. This can include a hot
@@ -125,7 +125,7 @@ bool ProfileSummaryInfo::isFunctionHotInCallGraph(const Function *F,
   if (!F || !computeSummary())
     return false;
   if (auto FunctionCount = F->getEntryCount())
-    if (isHotCount(FunctionCount.getCount()))
+    if (isHotCount(FunctionCount.getValue()))
       return true;
 
   if (hasSampleProfile()) {
@@ -154,7 +154,7 @@ bool ProfileSummaryInfo::isFunctionColdInCallGraph(const Function *F,
   if (!F || !computeSummary())
     return false;
   if (auto FunctionCount = F->getEntryCount())
-    if (!isColdCount(FunctionCount.getCount()))
+    if (!isColdCount(FunctionCount.getValue()))
       return false;
 
   if (hasSampleProfile()) {
@@ -187,7 +187,7 @@ bool ProfileSummaryInfo::isFunctionEntryCold(const Function *F) {
   // FIXME: The heuristic used below for determining coldness is based on
   // preliminary SPEC tuning for inliner. This will eventually be a
   // convenience method that calls isHotCount.
-  return FunctionCount && isColdCount(FunctionCount.getCount());
+  return FunctionCount && isColdCount(FunctionCount.getValue());
 }
 
 /// Compute the hot and cold thresholds.

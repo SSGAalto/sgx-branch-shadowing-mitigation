@@ -390,8 +390,6 @@ private:
   void releaseMemory();
 
 public:
-  InputArgList() : NumInputArgStrings(0) {}
-
   InputArgList(const char* const *ArgBegin, const char* const *ArgEnd);
 
   InputArgList(InputArgList &&RHS)

@@ -433,7 +433,7 @@ void GCNIterativeScheduler::scheduleRegion(Region &R, Range &&Schedule,
 // Sort recorded regions by pressure - highest at the front
 void GCNIterativeScheduler::sortRegionsByPressure(unsigned TargetOcc) {
   const auto &ST = MF.getSubtarget<SISubtarget>();
-  llvm::sort(Regions.begin(), Regions.end(),
+  std::sort(Regions.begin(), Regions.end(),
     [&ST, TargetOcc](const Region *R1, const Region *R2) {
     return R2->MaxPressure.less(ST, R1->MaxPressure, TargetOcc);
   });
@@ -452,7 +452,7 @@ unsigned GCNIterativeScheduler::tryMaximizeOccupancy(unsigned TargetOcc) {
   // TODO: assert Regions are sorted descending by pressure
   const auto &ST = MF.getSubtarget<SISubtarget>();
   const auto Occ = Regions.front()->MaxPressure.getOccupancy(ST);
-  DEBUG(dbgs() << "Trying to improve occupancy, target = " << TargetOcc
+  DEBUG(dbgs() << "Trying to to improve occupancy, target = " << TargetOcc
                << ", current = " << Occ << '\n');
 
   auto NewOcc = TargetOcc;

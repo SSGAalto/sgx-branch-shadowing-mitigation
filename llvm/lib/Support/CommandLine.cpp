@@ -25,7 +25,6 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringMap.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Config/config.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -1081,10 +1080,7 @@ bool CommandLineParser::ParseCommandLineOptions(int argc,
   SmallVector<const char *, 20> newArgv(argv, argv + argc);
   BumpPtrAllocator A;
   StringSaver Saver(A);
-  ExpandResponseFiles(Saver,
-         Triple(sys::getProcessTriple()).isOSWindows() ?
-         cl::TokenizeWindowsCommandLine : cl::TokenizeGNUCommandLine,
-         newArgv);
+  ExpandResponseFiles(Saver, TokenizeGNUCommandLine, newArgv);
   argv = &newArgv[0];
   argc = static_cast<int>(newArgv.size());
 

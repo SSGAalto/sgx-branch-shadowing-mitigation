@@ -33,7 +33,7 @@ static void dumpExpression(raw_ostream &OS, ArrayRef<char> Data,
                            const MCRegisterInfo *MRI) {
   DWARFDataExtractor Extractor(StringRef(Data.data(), Data.size()),
                                IsLittleEndian, AddressSize);
-  DWARFExpression(Extractor, dwarf::DWARF_VERSION, AddressSize).print(OS, MRI);
+  DWARFExpression(Extractor, AddressSize, dwarf::DWARF_VERSION).print(OS, MRI);
 }
 
 void DWARFDebugLoc::LocationList::dump(raw_ostream &OS, bool IsLittleEndian,
@@ -43,10 +43,8 @@ void DWARFDebugLoc::LocationList::dump(raw_ostream &OS, bool IsLittleEndian,
   for (const Entry &E : Entries) {
     OS << '\n';
     OS.indent(Indent);
-    OS << format("[0x%*.*" PRIx64 ", ", AddressSize * 2, AddressSize * 2,
-                 E.Begin)
-       << format(" 0x%*.*" PRIx64 ")", AddressSize * 2, AddressSize * 2, E.End);
-    OS << ": ";
+    OS << format("0x%016" PRIx64, E.Begin) << " - "
+       << format("0x%016" PRIx64, E.End) << ": ";
 
     dumpExpression(OS, E.Loc, IsLittleEndian, AddressSize, MRI);
   }

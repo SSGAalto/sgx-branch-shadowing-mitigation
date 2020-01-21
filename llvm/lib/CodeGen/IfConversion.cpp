@@ -347,7 +347,7 @@ bool IfConverter::runOnMachineFunction(MachineFunction &MF) {
   BranchFolder::MBFIWrapper MBFI(getAnalysis<MachineBlockFrequencyInfo>());
   MBPI = &getAnalysis<MachineBranchProbabilityInfo>();
   MRI = &MF.getRegInfo();
-  SchedModel.init(&ST);
+  SchedModel.init(ST.getSchedModel(), &ST, TII);
 
   if (!TII) return false;
 

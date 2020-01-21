@@ -147,7 +147,7 @@ public:
     auto PacketBundle = Contents.rsplit('\n');
     auto HeadTail = PacketBundle.first.split('\n');
     StringRef Separator = "\n";
-    StringRef Indent = "\t";
+    StringRef Indent = "\t\t";
     OS << "\t{\n";
     while (!HeadTail.first.empty()) {
       StringRef InstTxt;
@@ -164,7 +164,7 @@ public:
     }
 
     if (HexagonMCInstrInfo::isMemReorderDisabled(Inst))
-      OS << "\n\t} :mem_noshuf" << PacketBundle.second;
+      OS << "\n\t}:mem_noshuf" << PacketBundle.second;
     else
       OS << "\t}" << PacketBundle.second;
   }
@@ -342,7 +342,8 @@ FeatureBitset Hexagon_MC::completeHVXFeatures(const FeatureBitset &S) {
     break;
   }
   bool UseHvx = false;
-  for (unsigned F : {ExtensionHVX, ExtensionHVX64B, ExtensionHVX128B}) {
+  for (unsigned F : {ExtensionHVX, ExtensionHVX64B, ExtensionHVX128B,
+                     ExtensionHVXDbl}) {
     if (!FB.test(F))
       continue;
     UseHvx = true;

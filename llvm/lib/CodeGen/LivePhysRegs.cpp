@@ -44,7 +44,7 @@ void LivePhysRegs::removeRegsInMask(const MachineOperand &MO,
 void LivePhysRegs::removeDefs(const MachineInstr &MI) {
   for (ConstMIBundleOperands O(MI); O.isValid(); ++O) {
     if (O->isReg()) {
-      if (!O->isDef() || O->isDebug())
+      if (!O->isDef())
         continue;
       unsigned Reg = O->getReg();
       if (!TargetRegisterInfo::isPhysicalRegister(Reg))
@@ -58,7 +58,7 @@ void LivePhysRegs::removeDefs(const MachineInstr &MI) {
 /// Add uses to the set.
 void LivePhysRegs::addUses(const MachineInstr &MI) {
   for (ConstMIBundleOperands O(MI); O.isValid(); ++O) {
-    if (!O->isReg() || !O->readsReg() || O->isDebug())
+    if (!O->isReg() || !O->readsReg())
       continue;
     unsigned Reg = O->getReg();
     if (!TargetRegisterInfo::isPhysicalRegister(Reg))
@@ -85,7 +85,7 @@ void LivePhysRegs::stepForward(const MachineInstr &MI,
         SmallVectorImpl<std::pair<unsigned, const MachineOperand*>> &Clobbers) {
   // Remove killed registers from the set.
   for (ConstMIBundleOperands O(MI); O.isValid(); ++O) {
-    if (O->isReg() && !O->isDebug()) {
+    if (O->isReg()) {
       unsigned Reg = O->getReg();
       if (!TargetRegisterInfo::isPhysicalRegister(Reg))
         continue;

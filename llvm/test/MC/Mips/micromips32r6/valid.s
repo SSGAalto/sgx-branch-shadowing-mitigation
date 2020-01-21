@@ -68,7 +68,9 @@
   lapc $7, 1048572         # CHECK: lapc $7, 1048572    # encoding: [0x78,0xe3,0xff,0xff]
   lapc $7, -1048576        # CHECK: lapc $7, -1048576   # encoding: [0x78,0xe4,0x00,0x00]
   lh $2, 8($4)             # CHECK: lh $2, 8($4)        # encoding: [0x3c,0x44,0x00,0x08]
+  lhe $4, 8($2)            # CHECK: lhe $4, 8($2)       # encoding: [0x60,0x82,0x6a,0x08]
   lhu $4, 8($2)            # CHECK: lhu $4, 8($2)       # encoding: [0x34,0x82,0x00,0x08]
+  lhue $4, 8($2)           # CHECK: lhue $4, 8($2)      # encoding: [0x60,0x82,0x62,0x08]
   lsa $2, $3, $4, 3        # CHECK: lsa  $2, $3, $4, 3  # encoding: [0x00,0x43,0x24,0x0f]
   lwpc    $2,268           # CHECK: lwpc $2, 268        # encoding: [0x78,0x48,0x00,0x43]
   lwm $16, $17, $ra, 8($sp)   # CHECK: lwm16 $16, $17, $ra, 8($sp) # encoding: [0x45,0x22]
@@ -146,28 +148,23 @@
   xor $3, $4, $5           # CHECK: xor $3, $4, $5      # encoding: [0x00,0xa4,0x1b,0x10]
   xori $3, $4, 1234        # CHECK: xori $3, $4, 1234   # encoding: [0x70,0x64,0x04,0xd2]
   sw $5, 4($6)             # CHECK: sw $5, 4($6)        # encoding: [0xf8,0xa6,0x00,0x04]
+  swe $5, 8($4)            # CHECK: swe $5, 8($4)       # encoding: [0x60,0xa4,0xae,0x08]
   add.s $f3, $f4, $f5      # CHECK: add.s $f3, $f4, $f5 # encoding: [0x54,0xa4,0x18,0x30]
   add.d $f2, $f4, $f6      # CHECK: add.d $f2, $f4, $f6 # encoding: [0x54,0xc4,0x11,0x30]
-                           # CHECK-NEXT:                # <MCInst #{{[0-9]+}} FADD_D64_MM
   sub.s $f3, $f4, $f5      # CHECK: sub.s $f3, $f4, $f5 # encoding: [0x54,0xa4,0x18,0x70]
   sub.d $f2, $f4, $f6      # CHECK: sub.d $f2, $f4, $f6 # encoding: [0x54,0xc4,0x11,0x70]
-                           # CHECK-NEXT:                # <MCInst #{{[0-9]+}} FSUB_D64_MM
   mul.s $f3, $f4, $f5      # CHECK: mul.s $f3, $f4, $f5 # encoding: [0x54,0xa4,0x18,0xb0]
   mul.d $f2, $f4, $f6      # CHECK: mul.d $f2, $f4, $f6 # encoding: [0x54,0xc4,0x11,0xb0]
-                           # CHECK-NEXT:                # <MCInst #{{[0-9]+}} FMUL_D64_MM
   div.s $f3, $f4, $f5      # CHECK: div.s $f3, $f4, $f5 # encoding: [0x54,0xa4,0x18,0xf0]
   div.d $f2, $f4, $f6      # CHECK: div.d $f2, $f4, $f6 # encoding: [0x54,0xc4,0x11,0xf0]
-                           # CHECK-NEXT:                # <MCInst #{{[0-9]+}} FDIV_D64_MM
   maddf.s $f3, $f4, $f5    # CHECK: maddf.s $f3, $f4, $f5 # encoding: [0x54,0xa4,0x19,0xb8]
   maddf.d $f3, $f4, $f5    # CHECK: maddf.d $f3, $f4, $f5 # encoding: [0x54,0xa4,0x1b,0xb8]
   msubf.s $f3, $f4, $f5    # CHECK: msubf.s $f3, $f4, $f5 # encoding: [0x54,0xa4,0x19,0xf8]
   msubf.d $f3, $f4, $f5    # CHECK: msubf.d $f3, $f4, $f5 # encoding: [0x54,0xa4,0x1b,0xf8]
   mov.s $f6, $f7           # CHECK: mov.s $f6, $f7      # encoding: [0x54,0xc7,0x00,0x7b]
   mov.d $f4, $f6           # CHECK: mov.d $f4, $f6      # encoding: [0x54,0x86,0x20,0x7b]
-                           # CHECK-NEXT:                # <MCInst #{{[0-9]+}} FMOV_D64_MM
   neg.s $f6, $f7           # CHECK: neg.s $f6, $f7      # encoding: [0x54,0xc7,0x0b,0x7b]
-  neg.d   $f0, $f2         # CHECK: neg.d   $f0, $f2    # encoding: [0x54,0x02,0x2b,0x7b]
-                           # CHECK-NEXT:                # <MCInst #{{[0-9]+}} FNEG_D64_MM
+  neg.d $f4, $f6           # CHECK: neg.d $f4, $f6      # encoding: [0x54,0x86,0x2b,0x7b]
   max.s $f5, $f4, $f3      # CHECK: max.s $f5, $f4, $f3      # encoding: [0x54,0x64,0x28,0x0b]
   max.d $f5, $f4, $f3      # CHECK: max.d $f5, $f4, $f3      # encoding: [0x54,0x64,0x2a,0x0b]
   maxa.s $f5, $f4, $f3     # CHECK: maxa.s $f5, $f4, $f3     # encoding: [0x54,0x64,0x28,0x2b]
@@ -212,20 +209,14 @@
   cvt.l.d $f3, $f4         # CHECK: cvt.l.d $f3, $f4         # encoding: [0x54,0x64,0x41,0x3b]
   cvt.w.s $f3, $f4         # CHECK: cvt.w.s $f3, $f4         # encoding: [0x54,0x64,0x09,0x3b]
   cvt.w.d $f3, $f4         # CHECK: cvt.w.d $f3, $f4         # encoding: [0x54,0x64,0x49,0x3b]
-                           # CHECK-NEXT:                     # <MCInst #{{[0-9]+}} CVT_W_D64_MM
   cvt.d.s $f2, $f4         # CHECK: cvt.d.s $f2, $f4         # encoding: [0x54,0x44,0x13,0x7b]
-                           # CHECK-NEXT:                     # <MCInst #{{[0-9]+}} CVT_D64_S_MM
   cvt.d.w $f2, $f4         # CHECK: cvt.d.w $f2, $f4         # encoding: [0x54,0x44,0x33,0x7b]
-                           # CHECK-NEXT:                     # <MCInst #{{[0-9]+}} CVT_D64_W_MM
   cvt.d.l $f2, $f4         # CHECK: cvt.d.l $f2, $f4         # encoding: [0x54,0x44,0x53,0x7b]
   cvt.s.d $f2, $f4         # CHECK: cvt.s.d $f2, $f4         # encoding: [0x54,0x44,0x1b,0x7b]
-                           # CHECK-NEXT:                     # <MCInst #{{[0-9]+}} CVT_S_D64_MM
   cvt.s.w $f3, $f4         # CHECK: cvt.s.w $f3, $f4         # encoding: [0x54,0x64,0x3b,0x7b]
   cvt.s.l $f3, $f4         # CHECK: cvt.s.l $f3, $f4         # encoding: [0x54,0x64,0x5b,0x7b]
-  abs.s $f0, $f12          # CHECK: abs.s  $f0, $f12         # encoding: [0x54,0x0c,0x03,0x7b]
-                           # CHECK-NEXT:                     # <MCInst #{{[0-9]+}} FABS_S_MM
-  abs.d $f0, $f12          # CHECK: abs.d  $f0, $f12         # encoding: [0x54,0x0c,0x23,0x7b]
-                           # CHECK-NEXT:                     # <MCInst #{{[0-9]+}} FABS_D64_MM
+  abs.s $f3, $f5           # CHECK: abs.s $f3, $f5      # encoding: [0x54,0x65,0x03,0x7b]
+  abs.d $f2, $f4           # CHECK: abs.d $f2, $f4      # encoding: [0x54,0x44,0x23,0x7b]
   floor.l.s $f3, $f5       # CHECK: floor.l.s $f3, $f5  # encoding: [0x54,0x65,0x03,0x3b]
   floor.l.d $f2, $f4       # CHECK: floor.l.d $f2, $f4  # encoding: [0x54,0x44,0x43,0x3b]
   floor.w.s $f3, $f5       # CHECK: floor.w.s $f3, $f5  # encoding: [0x54,0x65,0x0b,0x3b]
@@ -238,10 +229,8 @@
   trunc.l.d $f2, $f4       # CHECK: trunc.l.d $f2, $f4  # encoding: [0x54,0x44,0x63,0x3b]
   trunc.w.s $f3, $f5       # CHECK: trunc.w.s $f3, $f5  # encoding: [0x54,0x65,0x2b,0x3b]
   trunc.w.d $f2, $f4       # CHECK: trunc.w.d $f2, $f4  # encoding: [0x54,0x44,0x6b,0x3b]
-  sqrt.s $f0, $f12         # CHECK: sqrt.s  $f0, $f12   # encoding: [0x54,0x0c,0x0a,0x3b]
-                           # CHECK-NEXT:                # <MCInst #{{[0-9]+}} FSQRT_S_MM
-  sqrt.d $f0, $f12         # CHECK: sqrt.d  $f0, $f12   # encoding: [0x54,0x0c,0x4a,0x3b]
-                           # CHECK-NEXT:                # <MCInst #{{[0-9]+}} FSQRT_D64_MM
+  sqrt.s $f3, $f5          # CHECK: sqrt.s $f3, $f5     # encoding: [0x54,0x65,0x0a,0x3b]
+  sqrt.d $f2, $f4          # CHECK: sqrt.d $f2, $f4     # encoding: [0x54,0x44,0x4a,0x3b]
   rsqrt.s $f3, $f5         # CHECK: rsqrt.s $f3, $f5    # encoding: [0x54,0x65,0x02,0x3b]
   rsqrt.d $f2, $f4         # CHECK: rsqrt.d $f2, $f4    # encoding: [0x54,0x44,0x42,0x3b]
   lw $3, -260($gp)         # CHECK: lw $3, -260($gp)    # encoding: [0xfc,0x7c,0xfe,0xfc]
@@ -257,7 +246,12 @@
   lbu16 $3, 4($17)         # CHECK: lbu16 $3, 4($17)    # encoding: [0x09,0x94]
   lbu16 $3, -1($17)        # CHECK: lbu16 $3, -1($17)   # encoding: [0x09,0x9f]
   sb  $4, 6($5)            # CHECK: sb  $4, 6($5)       # encoding: [0x18,0x85,0x00,0x06]
+  sbe $4, 6($5)            # CHECK: sbe $4, 6($5)       # encoding: [0x60,0x85,0xa8,0x06]
+  sce $4, 6($5)            # CHECK: sce $4, 6($5)       # encoding: [0x60,0x85,0xac,0x06]
   sh $4, 6($5)             # CHECK: sh $4, 6($5)        # encoding: [0x38,0x85,0x00,0x06]
+  she $4, 6($5)            # CHECK: she $4, 6($5)       # encoding: [0x60,0x85,0xaa,0x06]
+  lle $4, 6($5)            # CHECK: lle $4, 6($5)       # encoding: [0x60,0x85,0x6c,0x06]
+  lwe $4, 6($5)            # CHECK: lwe $4, 6($5)       # encoding: [0x60,0x85,0x6e,0x06]
   lw $4, 6($5)             # CHECK: lw $4, 6($5)        # encoding: [0xfc,0x85,0x00,0x06]
   lui $6, 17767            # CHECK: lui $6, 17767       # encoding: [0x10,0xc0,0x45,0x67]
   addu16 $6, $17, $4       # CHECK: addu16 $6, $17, $4  # encoding: [0x04,0xcc]
@@ -267,6 +261,8 @@
   or16 $3, $7              # CHECK: or16 $3, $7         # encoding: [0x45,0xf9]
   sll16 $3, $6, 8          # CHECK: sll16 $3, $6, 8     # encoding: [0x25,0xe0]
   srl16 $3, $6, 8          # CHECK: srl16 $3, $6, 8     # encoding: [0x25,0xe1]
+  prefe 1, 8($5)           # CHECK: prefe 1, 8($5)      # encoding: [0x60,0x25,0xa4,0x08]
+  cachee 1, 8($5)          # CHECK: cachee 1, 8($5)     # encoding: [0x60,0x25,0xa6,0x08]
   teq $8, $9               # CHECK: teq $8, $9          # encoding: [0x01,0x28,0x00,0x3c]
   teq $5, $7, 15           # CHECK: teq $5, $7, 15      # encoding: [0x00,0xe5,0xf0,0x3c]
   tge $7, $10              # CHECK: tge $7, $10         # encoding: [0x01,0x47,0x02,0x3c]
@@ -287,6 +283,8 @@
   xor16 $17, $5            # CHECK: xor16 $17, $5       # encoding: [0x44,0xd8]
   lb $4, 8($5)             # CHECK: lb $4, 8($5)        # encoding: [0x1c,0x85,0x00,0x08]
   lbu $4, 8($5)            # CHECK: lbu $4, 8($5)       # encoding: [0x14,0x85,0x00,0x08]
+  lbe $4, 8($5)            # CHECK: lbe $4, 8($5)       # encoding: [0x60,0x85,0x68,0x08]
+  lbue $4, 8($5)           # CHECK: lbue $4, 8($5)      # encoding: [0x60,0x85,0x60,0x08]
   recip.s $f2, $f4         # CHECK: recip.s $f2, $f4    # encoding: [0x54,0x44,0x12,0x3b]
   recip.d $f2, $f4         # CHECK: recip.d $f2, $f4    # encoding: [0x54,0x44,0x52,0x3b]
   rint.s $f2, $f4          # CHECK: rint.s $f2, $f4     # encoding: [0x54,0x82,0x00,0x20]
@@ -317,7 +315,6 @@
   mthc0 $7, $8             # CHECK: mthc0 $7, $8, 0        # encoding: [0x00,0xe8,0x02,0xf4]
   mthc0 $9, $10, 1         # CHECK: mthc0 $9, $10, 1       # encoding: [0x01,0x2a,0x0a,0xf4]
   mthc1 $11, $f12          # CHECK: mthc1 $11, $f12        # encoding: [0x55,0x6c,0x38,0x3b]
-                           # CHECK-NEXT:                   # <MCInst #{{[0-9]+}} MTHC1_D64_MM
   mthc2 $13, $14           # CHECK: mthc2 $13, $14         # encoding: [0x01,0xae,0x9d,0x3c]
   mfc0 $3, $7              # CHECK: mfc0 $3, $7, 0         # encoding: [0x00,0x67,0x00,0xfc]
   mfc0 $3, $7, 3           # CHECK: mfc0 $3, $7, 3         # encoding: [0x00,0x67,0x18,0xfc]
@@ -326,7 +323,6 @@
   mfhc0 $20, $21           # CHECK: mfhc0 $20, $21, 0      # encoding: [0x02,0x95,0x00,0xf4]
   mfhc0 $1, $2, 1          # CHECK: mfhc0 $1, $2, 1        # encoding: [0x00,0x22,0x08,0xf4]
   mfhc1 $zero, $f6         # CHECK: mfhc1 $zero, $f6       # encoding: [0x54,0x06,0x30,0x3b]
-                           # CHECK-NEXT:                   # <MCInst #{{[0-9]+}} MFHC1_D64_MM
   mfhc2 $23, $16           # CHECK: mfhc2 $23, $16         # encoding: [0x02,0xf0,0x8d,0x3c]
   tlbp                     # CHECK: tlbp                   # encoding: [0x00,0x00,0x03,0x7c]
   tlbr                     # CHECK: tlbr                   # encoding: [0x00,0x00,0x13,0x7c]

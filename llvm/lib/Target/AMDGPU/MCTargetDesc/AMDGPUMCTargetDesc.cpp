@@ -76,7 +76,7 @@ static MCTargetStreamer *createAMDGPUAsmTargetStreamer(MCStreamer &S,
 static MCTargetStreamer * createAMDGPUObjectTargetStreamer(
                                                    MCStreamer &S,
                                                    const MCSubtargetInfo &STI) {
-  return new AMDGPUTargetELFStreamer(S, STI);
+  return new AMDGPUTargetELFStreamer(S);
 }
 
 static MCStreamer *createMCStreamer(const Triple &T, MCContext &Context,
@@ -103,8 +103,6 @@ extern "C" void LLVMInitializeAMDGPUTargetMC() {
   // R600 specific registration
   TargetRegistry::RegisterMCCodeEmitter(getTheAMDGPUTarget(),
                                         createR600MCCodeEmitter);
-  TargetRegistry::RegisterObjectTargetStreamer(
-      getTheAMDGPUTarget(), createAMDGPUObjectTargetStreamer);
 
   // GCN specific registration
   TargetRegistry::RegisterMCCodeEmitter(getTheGCNTarget(),

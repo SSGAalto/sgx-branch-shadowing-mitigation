@@ -173,7 +173,7 @@ int llvm::dlltoolDriverMain(llvm::ArrayRef<const char *> ArgsArr) {
     }
   }
 
-  if (writeImportLibrary(Def->OutputFile, Path, Def->Exports, Machine, true, true))
+  if (writeImportLibrary(Def->OutputFile, Path, Def->Exports, Machine, true))
     return 1;
   return 0;
 }

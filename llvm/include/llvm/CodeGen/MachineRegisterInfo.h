@@ -20,7 +20,6 @@
 #include "llvm/ADT/IndexedMap.h"
 #include "llvm/ADT/PointerUnion.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/StringSet.h"
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/CodeGen/GlobalISel/RegisterBank.h"
 #include "llvm/CodeGen/LowLevelType.h"
@@ -75,13 +74,6 @@ private:
   IndexedMap<std::pair<RegClassOrRegBank, MachineOperand *>,
              VirtReg2IndexFunctor>
       VRegInfo;
-
-  /// Map for recovering vreg name from vreg number.
-  /// This map is used by the MIR Printer.
-  IndexedMap<std::string, VirtReg2IndexFunctor> VReg2Name;
-
-  /// StringSet that is used to unique vreg names.
-  StringSet<> VRegNames;
 
   /// The flag is true upon \p UpdatedCSRs initialization
   /// and false otherwise.
@@ -426,20 +418,6 @@ public:
   /// specified register (it may be live-in).
   bool def_empty(unsigned RegNo) const { return def_begin(RegNo) == def_end(); }
 
-  StringRef getVRegName(unsigned Reg) const {
-    return VReg2Name.inBounds(Reg) ? StringRef(VReg2Name[Reg]) : "";
-  }
-
-  void insertVRegByName(StringRef Name, unsigned Reg) {
-    assert((Name.empty() || VRegNames.find(Name) == VRegNames.end()) &&
-           "Named VRegs Must be Unique.");
-    if (!Name.empty()) {
-      VRegNames.insert(Name);
-      VReg2Name.grow(Reg);
-      VReg2Name[Reg] = Name.str();
-    }
-  }
-
   /// Return true if there is exactly one operand defining the specified
   /// register.
   bool hasOneDef(unsigned RegNo) const {
@@ -570,16 +548,12 @@ public:
   /// except that it also changes any definitions of the register as well.
   ///
   /// Note that it is usually necessary to first constrain ToReg's register
-  /// class and register bank to match the FromReg constraints using one of the
-  /// methods:
+  /// class to match the FromReg constraints using:
   ///
   ///   constrainRegClass(ToReg, getRegClass(FromReg))
-  ///   constrainRegAttrs(ToReg, FromReg)
-  ///   RegisterBankInfo::constrainGenericRegister(ToReg,
-  ///       *MRI.getRegClass(FromReg), MRI)
   ///
-  /// These functions will return a falsy result if the virtual registers have
-  /// incompatible constraints.
+  /// That function will return NULL if the virtual registers have incompatible
+  /// constraints.
   ///
   /// Note that if ToReg is a physical register the function will replace and
   /// apply sub registers to ToReg in order to obtain a final/proper physical
@@ -679,29 +653,9 @@ public:
   /// new register class, or NULL if no such class exists.
   /// This should only be used when the constraint is known to be trivial, like
   /// GR32 -> GR32_NOSP. Beware of increasing register pressure.
-  ///
-  /// \note Assumes that the register has a register class assigned.
-  /// Use RegisterBankInfo::constrainGenericRegister in GlobalISel's
-  /// InstructionSelect pass and constrainRegAttrs in every other pass,
-  /// including non-select passes of GlobalISel, instead.
   const TargetRegisterClass *constrainRegClass(unsigned Reg,
                                                const TargetRegisterClass *RC,
                                                unsigned MinNumRegs = 0);
-
-  /// Constrain the register class or the register bank of the virtual register
-  /// \p Reg to be a common subclass and a common bank of both registers
-  /// provided respectively. Do nothing if any of the attributes (classes,
-  /// banks, or low-level types) of the registers are deemed incompatible, or if
-  /// the resulting register will have a class smaller than before and of size
-  /// less than \p MinNumRegs. Return true if such register attributes exist,
-  /// false otherwise.
-  ///
-  /// \note Assumes that each register has either a low-level type or a class
-  /// assigned, but not both. Use this method instead of constrainRegClass and
-  /// RegisterBankInfo::constrainGenericRegister everywhere but SelectionDAG
-  /// ISel / FastISel and GlobalISel's InstructionSelect pass respectively.
-  bool constrainRegAttrs(unsigned Reg, unsigned ConstrainingReg,
-                         unsigned MinNumRegs = 0);
 
   /// recomputeRegClass - Try to find a legal super-class of Reg's register
   /// class that still satisfies the constraints from the instructions using
@@ -714,8 +668,7 @@ public:
 
   /// createVirtualRegister - Create and return a new virtual register in the
   /// function with the specified register class.
-  unsigned createVirtualRegister(const TargetRegisterClass *RegClass,
-                                 StringRef Name = "");
+  unsigned createVirtualRegister(const TargetRegisterClass *RegClass);
 
   /// Accessor for VRegToType. This accessor should only be used
   /// by global-isel related work.
@@ -734,7 +687,7 @@ public:
 
   /// Create and return a new generic virtual register with low-level
   /// type \p Ty.
-  unsigned createGenericVirtualRegister(LLT Ty, StringRef Name = "");
+  unsigned createGenericVirtualRegister(LLT Ty);
 
   /// Remove all types associated to virtual registers (after instruction
   /// selection and constraining of all generic virtual registers).
@@ -745,7 +698,7 @@ public:
   /// temporarily while constructing machine instructions. Most operations are
   /// undefined on an incomplete register until one of setRegClass(),
   /// setRegBank() or setSize() has been called on it.
-  unsigned createIncompleteVirtualRegister(StringRef Name = "");
+  unsigned createIncompleteVirtualRegister();
 
   /// getNumVirtRegs - Return the number of virtual registers created.
   unsigned getNumVirtRegs() const { return VRegInfo.size(); }

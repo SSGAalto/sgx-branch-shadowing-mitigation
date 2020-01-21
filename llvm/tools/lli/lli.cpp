@@ -378,8 +378,8 @@ int main(int argc, char **argv, char * const *envp) {
   std::string ErrorMsg;
   EngineBuilder builder(std::move(Owner));
   builder.setMArch(MArch);
-  builder.setMCPU(getCPUStr());
-  builder.setMAttrs(getFeatureList());
+  builder.setMCPU(MCPU);
+  builder.setMAttrs(MAttrs);
   if (RelocModel.getNumOccurrences())
     builder.setRelocationModel(RelocModel);
   if (CMModel.getNumOccurrences())

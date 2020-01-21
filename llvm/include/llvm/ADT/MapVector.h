@@ -36,17 +36,13 @@ template<typename KeyT, typename ValueT,
          typename MapType = DenseMap<KeyT, unsigned>,
          typename VectorType = std::vector<std::pair<KeyT, ValueT>>>
 class MapVector {
-  MapType Map;
-  VectorType Vector;
-
-  static_assert(
-      std::is_integral<typename MapType::mapped_type>::value,
-      "The mapped_type of the specified Map must be an integral type");
-
-public:
   using value_type = typename VectorType::value_type;
   using size_type = typename VectorType::size_type;
 
+  MapType Map;
+  VectorType Vector;
+
+public:
   using iterator = typename VectorType::iterator;
   using const_iterator = typename VectorType::const_iterator;
   using reverse_iterator = typename VectorType::reverse_iterator;
@@ -97,9 +93,9 @@ public:
   }
 
   ValueT &operator[](const KeyT &Key) {
-    std::pair<KeyT, typename MapType::mapped_type> Pair = std::make_pair(Key, 0);
+    std::pair<KeyT, unsigned> Pair = std::make_pair(Key, 0);
     std::pair<typename MapType::iterator, bool> Result = Map.insert(Pair);
-    auto &I = Result.first->second;
+    unsigned &I = Result.first->second;
     if (Result.second) {
       Vector.push_back(std::make_pair(Key, ValueT()));
       I = Vector.size() - 1;
@@ -116,9 +112,9 @@ public:
   }
 
   std::pair<iterator, bool> insert(const std::pair<KeyT, ValueT> &KV) {
-    std::pair<KeyT, typename MapType::mapped_type> Pair = std::make_pair(KV.first, 0);
+    std::pair<KeyT, unsigned> Pair = std::make_pair(KV.first, 0);
     std::pair<typename MapType::iterator, bool> Result = Map.insert(Pair);
-    auto &I = Result.first->second;
+    unsigned &I = Result.first->second;
     if (Result.second) {
       Vector.push_back(std::make_pair(KV.first, KV.second));
       I = Vector.size() - 1;
@@ -129,9 +125,9 @@ public:
 
   std::pair<iterator, bool> insert(std::pair<KeyT, ValueT> &&KV) {
     // Copy KV.first into the map, then move it into the vector.
-    std::pair<KeyT, typename MapType::mapped_type> Pair = std::make_pair(KV.first, 0);
+    std::pair<KeyT, unsigned> Pair = std::make_pair(KV.first, 0);
     std::pair<typename MapType::iterator, bool> Result = Map.insert(Pair);
-    auto &I = Result.first->second;
+    unsigned &I = Result.first->second;
     if (Result.second) {
       Vector.push_back(std::move(KV));
       I = Vector.size() - 1;

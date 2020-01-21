@@ -14,7 +14,6 @@
 
 #include "RISCVISelLowering.h"
 #include "RISCV.h"
-#include "RISCVMachineFunctionInfo.h"
 #include "RISCVRegisterInfo.h"
 #include "RISCVSubtarget.h"
 #include "RISCVTargetMachine.h"
@@ -45,9 +44,6 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
   // Set up the register classes.
   addRegisterClass(XLenVT, &RISCV::GPRRegClass);
 
-  if (Subtarget.hasStdExtF())
-    addRegisterClass(MVT::f32, &RISCV::FPR32RegClass);
-
   // Compute derived properties from the register classes.
   computeRegisterProperties(STI.getRegisterInfo());
 
@@ -67,11 +63,6 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::STACKSAVE, MVT::Other, Expand);
   setOperationAction(ISD::STACKRESTORE, MVT::Other, Expand);
 
-  setOperationAction(ISD::VASTART, MVT::Other, Custom);
-  setOperationAction(ISD::VAARG, MVT::Other, Expand);
-  setOperationAction(ISD::VACOPY, MVT::Other, Expand);
-  setOperationAction(ISD::VAEND, MVT::Other, Expand);
-
   for (auto VT : {MVT::i1, MVT::i8, MVT::i16})
     setOperationAction(ISD::SIGN_EXTEND_INREG, VT, Expand);
 
@@ -80,20 +71,18 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::SUBC, XLenVT, Expand);
   setOperationAction(ISD::SUBE, XLenVT, Expand);
 
-  if (!Subtarget.hasStdExtM()) {
-    setOperationAction(ISD::MUL, XLenVT, Expand);
-    setOperationAction(ISD::MULHS, XLenVT, Expand);
-    setOperationAction(ISD::MULHU, XLenVT, Expand);
-    setOperationAction(ISD::SDIV, XLenVT, Expand);
-    setOperationAction(ISD::UDIV, XLenVT, Expand);
-    setOperationAction(ISD::SREM, XLenVT, Expand);
-    setOperationAction(ISD::UREM, XLenVT, Expand);
-  }
-
+  setOperationAction(ISD::SREM, XLenVT, Expand);
   setOperationAction(ISD::SDIVREM, XLenVT, Expand);
+  setOperationAction(ISD::SDIV, XLenVT, Expand);
+  setOperationAction(ISD::UREM, XLenVT, Expand);
   setOperationAction(ISD::UDIVREM, XLenVT, Expand);
+  setOperationAction(ISD::UDIV, XLenVT, Expand);
+
+  setOperationAction(ISD::MUL, XLenVT, Expand);
   setOperationAction(ISD::SMUL_LOHI, XLenVT, Expand);
   setOperationAction(ISD::UMUL_LOHI, XLenVT, Expand);
+  setOperationAction(ISD::MULHS, XLenVT, Expand);
+  setOperationAction(ISD::MULHU, XLenVT, Expand);
 
   setOperationAction(ISD::SHL_PARTS, XLenVT, Expand);
   setOperationAction(ISD::SRL_PARTS, XLenVT, Expand);
@@ -106,22 +95,8 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::CTLZ, XLenVT, Expand);
   setOperationAction(ISD::CTPOP, XLenVT, Expand);
 
-  if (Subtarget.hasStdExtF()) {
-    setOperationAction(ISD::FMINNUM, MVT::f32, Legal);
-    setOperationAction(ISD::FMAXNUM, MVT::f32, Legal);
-    for (auto CC :
-         {ISD::SETOGT, ISD::SETOGE, ISD::SETONE, ISD::SETO, ISD::SETUEQ,
-          ISD::SETUGT, ISD::SETUGE, ISD::SETULT, ISD::SETULE, ISD::SETUNE,
-          ISD::SETGT, ISD::SETGE, ISD::SETNE})
-      setCondCodeAction(CC, MVT::f32, Expand);
-    setOperationAction(ISD::SELECT_CC, MVT::f32, Expand);
-    setOperationAction(ISD::SELECT, MVT::f32, Custom);
-    setOperationAction(ISD::BR_CC, MVT::f32, Expand);
-  }
-
   setOperationAction(ISD::GlobalAddress, XLenVT, Custom);
   setOperationAction(ISD::BlockAddress, XLenVT, Custom);
-  setOperationAction(ISD::ConstantPool, XLenVT, Custom);
 
   setBooleanContents(ZeroOrOneBooleanContent);
 
@@ -131,13 +106,6 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
 
   // Effectively disable jump table generation.
   setMinimumJumpTableEntries(INT_MAX);
-}
-
-EVT RISCVTargetLowering::getSetCCResultType(const DataLayout &DL, LLVMContext &,
-                                            EVT VT) const {
-  if (!VT.isVector())
-    return getPointerTy(DL);
-  return VT.changeVectorElementTypeToInteger();
 }
 
 // Changes the condition code and swaps operands if necessary, so the SetCC
@@ -188,16 +156,8 @@ SDValue RISCVTargetLowering::LowerOperation(SDValue Op,
     return lowerGlobalAddress(Op, DAG);
   case ISD::BlockAddress:
     return lowerBlockAddress(Op, DAG);
-  case ISD::ConstantPool:
-    return lowerConstantPool(Op, DAG);
   case ISD::SELECT:
     return lowerSELECT(Op, DAG);
-  case ISD::VASTART:
-    return lowerVASTART(Op, DAG);
-  case ISD::FRAMEADDR:
-    return LowerFRAMEADDR(Op, DAG);
-  case ISD::RETURNADDR:
-    return LowerRETURNADDR(Op, DAG);
   }
 }
 
@@ -239,29 +199,6 @@ SDValue RISCVTargetLowering::lowerBlockAddress(SDValue Op,
   SDValue MNLo =
     SDValue(DAG.getMachineNode(RISCV::ADDI, DL, Ty, MNHi, BALo), 0);
   return MNLo;
-}
-
-SDValue RISCVTargetLowering::lowerConstantPool(SDValue Op,
-                                               SelectionDAG &DAG) const {
-  SDLoc DL(Op);
-  EVT Ty = Op.getValueType();
-  ConstantPoolSDNode *N = cast<ConstantPoolSDNode>(Op);
-  const Constant *CPA = N->getConstVal();
-  int64_t Offset = N->getOffset();
-  unsigned Alignment = N->getAlignment();
-
-  if (!isPositionIndependent()) {
-    SDValue CPAHi =
-        DAG.getTargetConstantPool(CPA, Ty, Alignment, Offset, RISCVII::MO_HI);
-    SDValue CPALo =
-        DAG.getTargetConstantPool(CPA, Ty, Alignment, Offset, RISCVII::MO_LO);
-    SDValue MNHi = SDValue(DAG.getMachineNode(RISCV::LUI, DL, Ty, CPAHi), 0);
-    SDValue MNLo =
-        SDValue(DAG.getMachineNode(RISCV::ADDI, DL, Ty, MNHi, CPALo), 0);
-    return MNLo;
-  } else {
-    report_fatal_error("Unable to lowerConstantPool");
-  }
 }
 
 SDValue RISCVTargetLowering::lowerExternalSymbol(SDValue Op,
@@ -324,87 +261,14 @@ SDValue RISCVTargetLowering::lowerSELECT(SDValue Op, SelectionDAG &DAG) const {
   return DAG.getNode(RISCVISD::SELECT_CC, DL, VTs, Ops);
 }
 
-SDValue RISCVTargetLowering::lowerVASTART(SDValue Op, SelectionDAG &DAG) const {
-  MachineFunction &MF = DAG.getMachineFunction();
-  RISCVMachineFunctionInfo *FuncInfo = MF.getInfo<RISCVMachineFunctionInfo>();
-
-  SDLoc DL(Op);
-  SDValue FI = DAG.getFrameIndex(FuncInfo->getVarArgsFrameIndex(),
-                                 getPointerTy(MF.getDataLayout()));
-
-  // vastart just stores the address of the VarArgsFrameIndex slot into the
-  // memory location argument.
-  const Value *SV = cast<SrcValueSDNode>(Op.getOperand(2))->getValue();
-  return DAG.getStore(Op.getOperand(0), DL, FI, Op.getOperand(1),
-                      MachinePointerInfo(SV));
-}
-
-SDValue RISCVTargetLowering::LowerFRAMEADDR(SDValue Op,
-                                            SelectionDAG &DAG) const {
-  const RISCVRegisterInfo &RI = *Subtarget.getRegisterInfo();
-  MachineFunction &MF = DAG.getMachineFunction();
-  MachineFrameInfo &MFI = MF.getFrameInfo();
-  MFI.setFrameAddressIsTaken(true);
-  unsigned FrameReg = RI.getFrameRegister(MF);
-  int XLenInBytes = Subtarget.getXLen() / 8;
-
-  EVT VT = Op.getValueType();
-  SDLoc DL(Op);
-  SDValue FrameAddr = DAG.getCopyFromReg(DAG.getEntryNode(), DL, FrameReg, VT);
-  unsigned Depth = cast<ConstantSDNode>(Op.getOperand(0))->getZExtValue();
-  while (Depth--) {
-    int Offset = -(XLenInBytes * 2);
-    SDValue Ptr = DAG.getNode(ISD::ADD, DL, VT, FrameAddr,
-                              DAG.getIntPtrConstant(Offset, DL));
-    FrameAddr =
-        DAG.getLoad(VT, DL, DAG.getEntryNode(), Ptr, MachinePointerInfo());
-  }
-  return FrameAddr;
-}
-
-SDValue RISCVTargetLowering::LowerRETURNADDR(SDValue Op,
-                                             SelectionDAG &DAG) const {
-  const RISCVRegisterInfo &RI = *Subtarget.getRegisterInfo();
-  MachineFunction &MF = DAG.getMachineFunction();
-  MachineFrameInfo &MFI = MF.getFrameInfo();
-  MFI.setReturnAddressIsTaken(true);
-  MVT XLenVT = Subtarget.getXLenVT();
-  int XLenInBytes = Subtarget.getXLen() / 8;
-
-  if (verifyReturnAddressArgumentIsConstant(Op, DAG))
-    return SDValue();
-
-  EVT VT = Op.getValueType();
-  SDLoc DL(Op);
-  unsigned Depth = cast<ConstantSDNode>(Op.getOperand(0))->getZExtValue();
-  if (Depth) {
-    int Off = -XLenInBytes;
-    SDValue FrameAddr = LowerFRAMEADDR(Op, DAG);
-    SDValue Offset = DAG.getConstant(Off, DL, VT);
-    return DAG.getLoad(VT, DL, DAG.getEntryNode(),
-                       DAG.getNode(ISD::ADD, DL, VT, FrameAddr, Offset),
-                       MachinePointerInfo());
-  }
-
-  // Return the value of the return address register, marking it an implicit
-  // live-in.
-  unsigned Reg = MF.addLiveIn(RI.getRARegister(), getRegClassFor(XLenVT));
-  return DAG.getCopyFromReg(DAG.getEntryNode(), DL, Reg, XLenVT);
-}
-
 MachineBasicBlock *
 RISCVTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                  MachineBasicBlock *BB) const {
   const TargetInstrInfo &TII = *BB->getParent()->getSubtarget().getInstrInfo();
   DebugLoc DL = MI.getDebugLoc();
 
-  switch (MI.getOpcode()) {
-  default:
-    llvm_unreachable("Unexpected instr type to insert");
-  case RISCV::Select_GPR_Using_CC_GPR:
-  case RISCV::Select_FPR32_Using_CC_GPR:
-    break;
-  }
+  assert(MI.getOpcode() == RISCV::Select_GPR_Using_CC_GPR &&
+         "Unexpected instr type to insert");
 
   // To "insert" a SELECT instruction, we actually have to insert the triangle
   // control-flow pattern.  The incoming instruction knows the destination vreg
@@ -534,36 +398,18 @@ static bool CC_RISCVAssign2XLen(unsigned XLen, CCState &State, CCValAssign VA1,
 // Implements the RISC-V calling convention. Returns true upon failure.
 static bool CC_RISCV(const DataLayout &DL, unsigned ValNo, MVT ValVT, MVT LocVT,
                      CCValAssign::LocInfo LocInfo, ISD::ArgFlagsTy ArgFlags,
-                     CCState &State, bool IsFixed, bool IsRet, Type *OrigTy) {
+                     CCState &State, bool IsFixed, bool IsRet) {
   unsigned XLen = DL.getLargestLegalIntTypeSizeInBits();
   assert(XLen == 32 || XLen == 64);
   MVT XLenVT = XLen == 32 ? MVT::i32 : MVT::i64;
-  if (ValVT == MVT::f32) {
-    LocVT = MVT::i32;
-    LocInfo = CCValAssign::BCvt;
-  }
+  assert(ValVT == XLenVT && "Unexpected ValVT");
   assert(LocVT == XLenVT && "Unexpected LocVT");
+  assert(IsFixed && "Vararg support not yet implemented");
 
   // Any return value split in to more than two values can't be returned
   // directly.
   if (IsRet && ValNo > 1)
     return true;
-
-  // If this is a variadic argument, the RISC-V calling convention requires
-  // that it is assigned an 'even' or 'aligned' register if it has 8-byte
-  // alignment (RV32) or 16-byte alignment (RV64). An aligned register should
-  // be used regardless of whether the original argument was split during
-  // legalisation or not. The argument will not be passed by registers if the
-  // original type is larger than 2*XLEN, so the register alignment rule does
-  // not apply.
-  unsigned TwoXLenInBytes = (2 * XLen) / 8;
-  if (!IsFixed && ArgFlags.getOrigAlign() == TwoXLenInBytes &&
-      DL.getTypeAllocSize(OrigTy) == TwoXLenInBytes) {
-    unsigned RegIdx = State.getFirstUnallocated(ArgGPRs);
-    // Skip 'odd' register if necessary.
-    if (RegIdx != array_lengthof(ArgGPRs) && RegIdx % 2 == 1)
-      State.AllocateReg(ArgGPRs);
-  }
 
   SmallVectorImpl<CCValAssign> &PendingLocs = State.getPendingLocs();
   SmallVectorImpl<ISD::ArgFlagsTy> &PendingArgFlags =
@@ -636,20 +482,13 @@ void RISCVTargetLowering::analyzeInputArgs(
     MachineFunction &MF, CCState &CCInfo,
     const SmallVectorImpl<ISD::InputArg> &Ins, bool IsRet) const {
   unsigned NumArgs = Ins.size();
-  FunctionType *FType = MF.getFunction().getFunctionType();
 
   for (unsigned i = 0; i != NumArgs; ++i) {
     MVT ArgVT = Ins[i].VT;
     ISD::ArgFlagsTy ArgFlags = Ins[i].Flags;
 
-    Type *ArgTy = nullptr;
-    if (IsRet)
-      ArgTy = FType->getReturnType();
-    else if (Ins[i].isOrigArg())
-      ArgTy = FType->getParamType(Ins[i].getOrigArgIndex());
-
     if (CC_RISCV(MF.getDataLayout(), i, ArgVT, ArgVT, CCValAssign::Full,
-                 ArgFlags, CCInfo, /*IsRet=*/true, IsRet, ArgTy)) {
+                 ArgFlags, CCInfo, /*IsRet=*/true, IsRet)) {
       DEBUG(dbgs() << "InputArg #" << i << " has unhandled type "
                    << EVT(ArgVT).getEVTString() << '\n');
       llvm_unreachable(nullptr);
@@ -659,17 +498,15 @@ void RISCVTargetLowering::analyzeInputArgs(
 
 void RISCVTargetLowering::analyzeOutputArgs(
     MachineFunction &MF, CCState &CCInfo,
-    const SmallVectorImpl<ISD::OutputArg> &Outs, bool IsRet,
-    CallLoweringInfo *CLI) const {
+    const SmallVectorImpl<ISD::OutputArg> &Outs, bool IsRet) const {
   unsigned NumArgs = Outs.size();
 
   for (unsigned i = 0; i != NumArgs; i++) {
     MVT ArgVT = Outs[i].VT;
     ISD::ArgFlagsTy ArgFlags = Outs[i].Flags;
-    Type *OrigTy = CLI ? CLI->getArgs()[Outs[i].OrigArgIndex].Ty : nullptr;
 
     if (CC_RISCV(MF.getDataLayout(), i, ArgVT, ArgVT, CCValAssign::Full,
-                 ArgFlags, CCInfo, Outs[i].IsFixed, IsRet, OrigTy)) {
+                 ArgFlags, CCInfo, Outs[i].IsFixed, IsRet)) {
       DEBUG(dbgs() << "OutputArg #" << i << " has unhandled type "
                    << EVT(ArgVT).getEVTString() << "\n");
       llvm_unreachable(nullptr);
@@ -684,7 +521,6 @@ static SDValue unpackFromRegLoc(SelectionDAG &DAG, SDValue Chain,
   MachineFunction &MF = DAG.getMachineFunction();
   MachineRegisterInfo &RegInfo = MF.getRegInfo();
   EVT LocVT = VA.getLocVT();
-  EVT ValVT = VA.getValVT();
   SDValue Val;
 
   unsigned VReg = RegInfo.createVirtualRegister(&RISCV::GPRRegClass);
@@ -696,12 +532,8 @@ static SDValue unpackFromRegLoc(SelectionDAG &DAG, SDValue Chain,
     llvm_unreachable("Unexpected CCValAssign::LocInfo");
   case CCValAssign::Full:
   case CCValAssign::Indirect:
-    break;
-  case CCValAssign::BCvt:
-    Val = DAG.getNode(ISD::BITCAST, DL, ValVT, Val);
-    break;
+    return Val;
   }
-  return Val;
 }
 
 // The caller is responsible for loading the full value if the argument is
@@ -749,10 +581,9 @@ SDValue RISCVTargetLowering::LowerFormalArguments(
 
   MachineFunction &MF = DAG.getMachineFunction();
   EVT PtrVT = getPointerTy(DAG.getDataLayout());
-  MVT XLenVT = Subtarget.getXLenVT();
-  unsigned XLenInBytes = Subtarget.getXLen() / 8;
-  // Used with vargs to acumulate store chains.
-  std::vector<SDValue> OutChains;
+
+  if (IsVarArg)
+    report_fatal_error("VarArg not supported");
 
   // Assign locations to all of the incoming arguments.
   SmallVector<CCValAssign, 16> ArgLocs;
@@ -761,7 +592,7 @@ SDValue RISCVTargetLowering::LowerFormalArguments(
 
   for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
     CCValAssign &VA = ArgLocs[i];
-    assert(VA.getLocVT() == XLenVT && "Unhandled argument type");
+    assert(VA.getLocVT() == Subtarget.getXLenVT() && "Unhandled argument type");
     SDValue ArgValue;
     if (VA.isRegLoc())
       ArgValue = unpackFromRegLoc(DAG, Chain, VA, DL);
@@ -789,70 +620,6 @@ SDValue RISCVTargetLowering::LowerFormalArguments(
     }
     InVals.push_back(ArgValue);
   }
-
-  if (IsVarArg) {
-    ArrayRef<MCPhysReg> ArgRegs = makeArrayRef(ArgGPRs);
-    unsigned Idx = CCInfo.getFirstUnallocated(ArgRegs);
-    const TargetRegisterClass *RC = &RISCV::GPRRegClass;
-    MachineFrameInfo &MFI = MF.getFrameInfo();
-    MachineRegisterInfo &RegInfo = MF.getRegInfo();
-    RISCVMachineFunctionInfo *RVFI = MF.getInfo<RISCVMachineFunctionInfo>();
-
-    // Offset of the first variable argument from stack pointer, and size of
-    // the vararg save area. For now, the varargs save area is either zero or
-    // large enough to hold a0-a7.
-    int VaArgOffset, VarArgsSaveSize;
-
-    // If all registers are allocated, then all varargs must be passed on the
-    // stack and we don't need to save any argregs.
-    if (ArgRegs.size() == Idx) {
-      VaArgOffset = CCInfo.getNextStackOffset();
-      VarArgsSaveSize = 0;
-    } else {
-      VarArgsSaveSize = XLenInBytes * (ArgRegs.size() - Idx);
-      VaArgOffset = -VarArgsSaveSize;
-    }
-
-    // Record the frame index of the first variable argument
-    // which is a value necessary to VASTART.
-    int FI = MFI.CreateFixedObject(XLenInBytes, VaArgOffset, true);
-    RVFI->setVarArgsFrameIndex(FI);
-
-    // If saving an odd number of registers then create an extra stack slot to
-    // ensure that the frame pointer is 2*XLEN-aligned, which in turn ensures
-    // offsets to even-numbered registered remain 2*XLEN-aligned.
-    if (Idx % 2) {
-      FI = MFI.CreateFixedObject(XLenInBytes, VaArgOffset - (int)XLenInBytes,
-                                 true);
-      VarArgsSaveSize += XLenInBytes;
-    }
-
-    // Copy the integer registers that may have been used for passing varargs
-    // to the vararg save area.
-    for (unsigned I = Idx; I < ArgRegs.size();
-         ++I, VaArgOffset += XLenInBytes) {
-      const unsigned Reg = RegInfo.createVirtualRegister(RC);
-      RegInfo.addLiveIn(ArgRegs[I], Reg);
-      SDValue ArgValue = DAG.getCopyFromReg(Chain, DL, Reg, XLenVT);
-      FI = MFI.CreateFixedObject(XLenInBytes, VaArgOffset, true);
-      SDValue PtrOff = DAG.getFrameIndex(FI, getPointerTy(DAG.getDataLayout()));
-      SDValue Store = DAG.getStore(Chain, DL, ArgValue, PtrOff,
-                                   MachinePointerInfo::getFixedStack(MF, FI));
-      cast<StoreSDNode>(Store.getNode())
-          ->getMemOperand()
-          ->setValue((Value *)nullptr);
-      OutChains.push_back(Store);
-    }
-    RVFI->setVarArgsSaveSize(VarArgsSaveSize);
-  }
-
-  // All stores are grouped in one node to allow the matching between
-  // the size of Ins and InVals. This only happens for vararg functions.
-  if (!OutChains.empty()) {
-    OutChains.push_back(Chain);
-    Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other, OutChains);
-  }
-
   return Chain;
 }
 
@@ -873,12 +640,16 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
   EVT PtrVT = getPointerTy(DAG.getDataLayout());
   MVT XLenVT = Subtarget.getXLenVT();
 
+  if (IsVarArg) {
+    report_fatal_error("LowerCall with varargs not implemented");
+  }
+
   MachineFunction &MF = DAG.getMachineFunction();
 
   // Analyze the operands of the call, assigning locations to each operand.
   SmallVector<CCValAssign, 16> ArgLocs;
   CCState ArgCCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
-  analyzeOutputArgs(MF, ArgCCInfo, Outs, /*IsRet=*/false, &CLI);
+  analyzeOutputArgs(MF, ArgCCInfo, Outs, /*IsRet=*/false);
 
   // Get a count of how many bytes are to be pushed on the stack.
   unsigned NumBytes = ArgCCInfo.getNextStackOffset();
@@ -921,9 +692,6 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
     // For now, only handle fully promoted and indirect arguments.
     switch (VA.getLocInfo()) {
     case CCValAssign::Full:
-      break;
-    case CCValAssign::BCvt:
-      ArgValue = DAG.getNode(ISD::BITCAST, DL, VA.getLocVT(), ArgValue);
       break;
     case CCValAssign::Indirect: {
       // Store the argument in a stack slot and pass its address.
@@ -1039,16 +807,7 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
     Chain = RetValue.getValue(1);
     Glue = RetValue.getValue(2);
 
-    switch (VA.getLocInfo()) {
-    default:
-      llvm_unreachable("Unknown loc info!");
-    case CCValAssign::Full:
-      break;
-    case CCValAssign::BCvt:
-      RetValue = DAG.getNode(ISD::BITCAST, DL, VA.getValVT(), RetValue);
-      break;
-    }
-
+    assert(VA.getLocInfo() == CCValAssign::Full && "Unknown loc info!");
     InVals.push_back(RetValue);
   }
 
@@ -1064,26 +823,10 @@ bool RISCVTargetLowering::CanLowerReturn(
     MVT VT = Outs[i].VT;
     ISD::ArgFlagsTy ArgFlags = Outs[i].Flags;
     if (CC_RISCV(MF.getDataLayout(), i, VT, VT, CCValAssign::Full, ArgFlags,
-                 CCInfo, /*IsFixed=*/true, /*IsRet=*/true, nullptr))
+                 CCInfo, /*IsFixed=*/true, /*IsRet=*/true))
       return false;
   }
   return true;
-}
-
-static SDValue packIntoRegLoc(SelectionDAG &DAG, SDValue Val,
-                              const CCValAssign &VA, const SDLoc &DL) {
-  EVT LocVT = VA.getLocVT();
-
-  switch (VA.getLocInfo()) {
-  default:
-    llvm_unreachable("Unexpected CCValAssign::LocInfo");
-  case CCValAssign::Full:
-    break;
-  case CCValAssign::BCvt:
-    Val = DAG.getNode(ISD::BITCAST, DL, LocVT, Val);
-    break;
-  }
-  return Val;
 }
 
 SDValue
@@ -1092,6 +835,10 @@ RISCVTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
                                  const SmallVectorImpl<ISD::OutputArg> &Outs,
                                  const SmallVectorImpl<SDValue> &OutVals,
                                  const SDLoc &DL, SelectionDAG &DAG) const {
+  if (IsVarArg) {
+    report_fatal_error("VarArg not supported");
+  }
+
   // Stores the assignment of the return value to a location.
   SmallVector<CCValAssign, 16> RVLocs;
 
@@ -1099,8 +846,7 @@ RISCVTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
   CCState CCInfo(CallConv, IsVarArg, DAG.getMachineFunction(), RVLocs,
                  *DAG.getContext());
 
-  analyzeOutputArgs(DAG.getMachineFunction(), CCInfo, Outs, /*IsRet=*/true,
-                    nullptr);
+  analyzeOutputArgs(DAG.getMachineFunction(), CCInfo, Outs, /*IsRet=*/true);
 
   SDValue Flag;
   SmallVector<SDValue, 4> RetOps(1, Chain);
@@ -1110,7 +856,8 @@ RISCVTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
     SDValue Val = OutVals[i];
     CCValAssign &VA = RVLocs[i];
     assert(VA.isRegLoc() && "Can only return in registers!");
-    Val = packIntoRegLoc(DAG, Val, VA, DL);
+    assert(VA.getLocInfo() == CCValAssign::Full &&
+           "Unexpected CCValAssign::LocInfo");
 
     Chain = DAG.getCopyToReg(Chain, DL, VA.getLocReg(), Val, Flag);
 
@@ -1141,22 +888,4 @@ const char *RISCVTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "RISCVISD::SELECT_CC";
   }
   return nullptr;
-}
-
-std::pair<unsigned, const TargetRegisterClass *>
-RISCVTargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
-                                                  StringRef Constraint,
-                                                  MVT VT) const {
-  // First, see if this is a constraint that directly corresponds to a
-  // RISCV register class.
-  if (Constraint.size() == 1) {
-    switch (Constraint[0]) {
-    case 'r':
-      return std::make_pair(0U, &RISCV::GPRRegClass);
-    default:
-      break;
-    }
-  }
-
-  return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
 }

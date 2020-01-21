@@ -118,10 +118,8 @@ public:
                        SDValue &Offset, SDValue &Opc);
   bool SelectAddrMode3Offset(SDNode *Op, SDValue N,
                              SDValue &Offset, SDValue &Opc);
-  bool IsAddressingMode5(SDValue N, SDValue &Base, SDValue &Offset,
-                         int Lwb, int Upb, bool FP16);
-  bool SelectAddrMode5(SDValue N, SDValue &Base, SDValue &Offset);
-  bool SelectAddrMode5FP16(SDValue N, SDValue &Base, SDValue &Offset);
+  bool SelectAddrMode5(SDValue N, SDValue &Base,
+                       SDValue &Offset);
   bool SelectAddrMode6(SDNode *Parent, SDValue N, SDValue &Addr,SDValue &Align);
   bool SelectAddrMode6Offset(SDNode *Op, SDValue N, SDValue &Offset);
 
@@ -500,7 +498,7 @@ bool ARMDAGToDAGISel::canExtractShiftFromMul(const SDValue &N,
 
 void ARMDAGToDAGISel::replaceDAGValue(const SDValue &N, SDValue M) {
   CurDAG->RepositionNode(N.getNode()->getIterator(), M.getNode());
-  ReplaceUses(N, M);
+  CurDAG->ReplaceAllUsesWith(N, M);
 }
 
 bool ARMDAGToDAGISel::SelectImmShifterOperand(SDValue N,
@@ -888,8 +886,8 @@ bool ARMDAGToDAGISel::SelectAddrMode3Offset(SDNode *Op, SDValue N,
   return true;
 }
 
-bool ARMDAGToDAGISel::IsAddressingMode5(SDValue N, SDValue &Base, SDValue &Offset,
-                                        int Lwb, int Upb, bool FP16) {
+bool ARMDAGToDAGISel::SelectAddrMode5(SDValue N,
+                                      SDValue &Base, SDValue &Offset) {
   if (!CurDAG->isBaseWithConstantOffset(N)) {
     Base = N;
     if (N.getOpcode() == ISD::FrameIndex) {
@@ -909,9 +907,8 @@ bool ARMDAGToDAGISel::IsAddressingMode5(SDValue N, SDValue &Base, SDValue &Offse
 
   // If the RHS is +/- imm8, fold into addr mode.
   int RHSC;
-  const int Scale = FP16 ? 2 : 4;
-
-  if (isScaledConstantInRange(N.getOperand(1), Scale, Lwb, Upb, RHSC)) {
+  if (isScaledConstantInRange(N.getOperand(1), /*Scale=*/4,
+                              -256 + 1, 256, RHSC)) {
     Base = N.getOperand(0);
     if (Base.getOpcode() == ISD::FrameIndex) {
       int FI = cast<FrameIndexSDNode>(Base)->getIndex();
@@ -924,41 +921,15 @@ bool ARMDAGToDAGISel::IsAddressingMode5(SDValue N, SDValue &Base, SDValue &Offse
       AddSub = ARM_AM::sub;
       RHSC = -RHSC;
     }
-
-    if (FP16)
-      Offset = CurDAG->getTargetConstant(ARM_AM::getAM5FP16Opc(AddSub, RHSC),
-                                         SDLoc(N), MVT::i32);
-    else
-      Offset = CurDAG->getTargetConstant(ARM_AM::getAM5Opc(AddSub, RHSC),
-                                         SDLoc(N), MVT::i32);
-
+    Offset = CurDAG->getTargetConstant(ARM_AM::getAM5Opc(AddSub, RHSC),
+                                       SDLoc(N), MVT::i32);
     return true;
   }
 
   Base = N;
-
-  if (FP16)
-    Offset = CurDAG->getTargetConstant(ARM_AM::getAM5FP16Opc(ARM_AM::add, 0),
-                                       SDLoc(N), MVT::i32);
-  else
-    Offset = CurDAG->getTargetConstant(ARM_AM::getAM5Opc(ARM_AM::add, 0),
-                                       SDLoc(N), MVT::i32);
-
+  Offset = CurDAG->getTargetConstant(ARM_AM::getAM5Opc(ARM_AM::add, 0),
+                                     SDLoc(N), MVT::i32);
   return true;
-}
-
-bool ARMDAGToDAGISel::SelectAddrMode5(SDValue N,
-                                      SDValue &Base, SDValue &Offset) {
-  int Lwb = -256 + 1;
-  int Upb = 256;
-  return IsAddressingMode5(N, Base, Offset, Lwb, Upb, /*FP16=*/ false);
-}
-
-bool ARMDAGToDAGISel::SelectAddrMode5FP16(SDValue N,
-                                          SDValue &Base, SDValue &Offset) {
-  int Lwb = -512 + 1;
-  int Upb = 512;
-  return IsAddressingMode5(N, Base, Offset, Lwb, Upb, /*FP16=*/ true);
 }
 
 bool ARMDAGToDAGISel::SelectAddrMode6(SDNode *Parent, SDValue N, SDValue &Addr,
@@ -1794,17 +1765,15 @@ void ARMDAGToDAGISel::SelectVLD(SDNode *N, bool isUpdating, unsigned NumVecs,
     Ops.push_back(Align);
     if (isUpdating) {
       SDValue Inc = N->getOperand(AddrOpIdx + 1);
+      // FIXME: VLD1/VLD2 fixed increment doesn't need Reg0. Remove the reg0
+      // case entirely when the rest are updated to that form, too.
       bool IsImmUpdate = isPerfectIncrement(Inc, VT, NumVecs);
-      if (!IsImmUpdate) {
-        // We use a VLD1 for v1i64 even if the pseudo says vld2/3/4, so
-        // check for the opcode rather than the number of vector elements.
-        if (isVLDfixed(Opc))
-          Opc = getVLDSTRegisterUpdateOpcode(Opc);
-        Ops.push_back(Inc);
-      // VLD1/VLD2 fixed increment does not need Reg0 so only include it in
-      // the operands if not such an opcode.
-      } else if (!isVLDfixed(Opc))
-        Ops.push_back(Reg0);
+      if ((NumVecs <= 2) && !IsImmUpdate)
+        Opc = getVLDSTRegisterUpdateOpcode(Opc);
+      // FIXME: We use a VLD1 for v1i64 even if the pseudo says vld2/3/4, so
+      // check for that explicitly too. Horribly hacky, but temporary.
+      if ((NumVecs > 2 && !isVLDfixed(Opc)) || !IsImmUpdate)
+        Ops.push_back(IsImmUpdate ? Reg0 : Inc);
     }
     Ops.push_back(Pred);
     Ops.push_back(Reg0);
@@ -1893,14 +1862,12 @@ void ARMDAGToDAGISel::SelectVST(SDNode *N, bool isUpdating, unsigned NumVecs,
   default: llvm_unreachable("unhandled vst type");
     // Double-register operations:
   case MVT::v8i8:  OpcodeIndex = 0; break;
-  case MVT::v4f16:
   case MVT::v4i16: OpcodeIndex = 1; break;
   case MVT::v2f32:
   case MVT::v2i32: OpcodeIndex = 2; break;
   case MVT::v1i64: OpcodeIndex = 3; break;
     // Quad-register operations:
   case MVT::v16i8: OpcodeIndex = 0; break;
-  case MVT::v8f16:
   case MVT::v8i16: OpcodeIndex = 1; break;
   case MVT::v4f32:
   case MVT::v4i32: OpcodeIndex = 2; break;
@@ -1952,17 +1919,16 @@ void ARMDAGToDAGISel::SelectVST(SDNode *N, bool isUpdating, unsigned NumVecs,
     Ops.push_back(Align);
     if (isUpdating) {
       SDValue Inc = N->getOperand(AddrOpIdx + 1);
+      // FIXME: VST1/VST2 fixed increment doesn't need Reg0. Remove the reg0
+      // case entirely when the rest are updated to that form, too.
       bool IsImmUpdate = isPerfectIncrement(Inc, VT, NumVecs);
-      if (!IsImmUpdate) {
-        // We use a VST1 for v1i64 even if the pseudo says VST2/3/4, so
-        // check for the opcode rather than the number of vector elements.
-        if (isVSTfixed(Opc))
-          Opc = getVLDSTRegisterUpdateOpcode(Opc);
+      if (NumVecs <= 2 && !IsImmUpdate)
+        Opc = getVLDSTRegisterUpdateOpcode(Opc);
+      // FIXME: We use a VST1 for v1i64 even if the pseudo says vld2/3/4, so
+      // check for that explicitly too. Horribly hacky, but temporary.
+      if  (!IsImmUpdate)
         Ops.push_back(Inc);
-      }
-      // VST1/VST2 fixed increment does not need Reg0 so only include it in
-      // the operands if not such an opcode.
-      else if (!isVSTfixed(Opc))
+      else if (NumVecs > 2 && !isVSTfixed(Opc))
         Ops.push_back(Reg0);
     }
     Ops.push_back(SrcReg);
@@ -2799,7 +2765,7 @@ void ARMDAGToDAGISel::Select(SDNode *N) {
     }
   }
   case ARMISD::SUBE: {
-    if (!Subtarget->hasV6Ops() || !Subtarget->hasDSP())
+    if (!Subtarget->hasV6Ops())
       break;
     // Look for a pattern to match SMMLS
     // (sube a, (smul_loHi a, b), (subc 0, (smul_LOhi(a, b))))

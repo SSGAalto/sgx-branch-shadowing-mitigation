@@ -98,18 +98,6 @@ VRegInfo &PerFunctionMIParsingState::getVRegInfo(unsigned Num) {
   return *I.first->second;
 }
 
-VRegInfo &PerFunctionMIParsingState::getVRegInfoNamed(StringRef RegName) {
-  assert(RegName != "" && "Expected named reg.");
-
-  auto I = VRegInfosNamed.insert(std::make_pair(RegName.str(), nullptr));
-  if (I.second) {
-    VRegInfo *Info = new (Allocator) VRegInfo;
-    Info->VReg = MF.getRegInfo().createIncompleteVirtualRegister(RegName);
-    I.first->second = Info;
-  }
-  return *I.first->second;
-}
-
 namespace {
 
 /// A wrapper struct around the 'MachineOperand' struct that includes a source
@@ -194,7 +182,6 @@ public:
 
   bool parseNamedRegister(unsigned &Reg);
   bool parseVirtualRegister(VRegInfo *&Info);
-  bool parseNamedVirtualRegister(VRegInfo *&Info);
   bool parseRegister(unsigned &Reg, VRegInfo *&VRegInfo);
   bool parseRegisterFlag(unsigned &Flags);
   bool parseRegisterClassOrBank(VRegInfo &RegInfo);
@@ -241,7 +228,6 @@ public:
                                          Optional<unsigned> &TiedDefIdx);
   bool parseOffset(int64_t &Offset);
   bool parseAlignment(unsigned &Alignment);
-  bool parseAddrspace(unsigned &Addrspace);
   bool parseOperandsOffset(MachineOperand &Op);
   bool parseIRValue(const Value *&V);
   bool parseMemoryOperandFlag(MachineMemOperand::Flags &Flags);
@@ -936,13 +922,8 @@ bool MIParser::verifyImplicitOperands(ArrayRef<ParsedMachineOperand> Operands,
 }
 
 bool MIParser::parseInstruction(unsigned &OpCode, unsigned &Flags) {
-  // Allow both:
-  // * frame-setup frame-destroy OPCODE
-  // * frame-destroy frame-setup OPCODE
-  while (Token.is(MIToken::kw_frame_setup) ||
-         Token.is(MIToken::kw_frame_destroy)) {
-    Flags |= Token.is(MIToken::kw_frame_setup) ? MachineInstr::FrameSetup
-                                               : MachineInstr::FrameDestroy;
+  if (Token.is(MIToken::kw_frame_setup)) {
+    Flags |= MachineInstr::FrameSetup;
     lex();
   }
   if (Token.isNot(MIToken::Identifier))
@@ -962,18 +943,7 @@ bool MIParser::parseNamedRegister(unsigned &Reg) {
   return false;
 }
 
-bool MIParser::parseNamedVirtualRegister(VRegInfo *&Info) {
-  assert(Token.is(MIToken::NamedVirtualRegister) && "Expected NamedVReg token");
-  StringRef Name = Token.stringValue();
-  // TODO: Check that the VReg name is not the same as a physical register name.
-  //       If it is, then print a warning (when warnings are implemented).
-  Info = &PFS.getVRegInfoNamed(Name);
-  return false;
-}
-
 bool MIParser::parseVirtualRegister(VRegInfo *&Info) {
-  if (Token.is(MIToken::NamedVirtualRegister))
-    return parseNamedVirtualRegister(Info);
   assert(Token.is(MIToken::VirtualRegister) && "Needs VirtualRegister token");
   unsigned ID;
   if (getUnsigned(ID))
@@ -989,7 +959,6 @@ bool MIParser::parseRegister(unsigned &Reg, VRegInfo *&Info) {
     return false;
   case MIToken::NamedRegister:
     return parseNamedRegister(Reg);
-  case MIToken::NamedVirtualRegister:
   case MIToken::VirtualRegister:
     if (parseVirtualRegister(Info))
       return true;
@@ -1977,7 +1946,6 @@ bool MIParser::parseMachineOperand(MachineOperand &Dest,
   case MIToken::underscore:
   case MIToken::NamedRegister:
   case MIToken::VirtualRegister:
-  case MIToken::NamedVirtualRegister:
     return parseRegisterOperand(Dest, TiedDefIdx);
   case MIToken::IntegerLiteral:
     return parseImmediateOperand(Dest);
@@ -2118,17 +2086,6 @@ bool MIParser::parseAlignment(unsigned &Alignment) {
   if (Token.isNot(MIToken::IntegerLiteral) || Token.integerValue().isSigned())
     return error("expected an integer literal after 'align'");
   if (getUnsigned(Alignment))
-    return true;
-  lex();
-  return false;
-}
-
-bool MIParser::parseAddrspace(unsigned &Addrspace) {
-  assert(Token.is(MIToken::kw_addrspace));
-  lex();
-  if (Token.isNot(MIToken::IntegerLiteral) || Token.integerValue().isSigned())
-    return error("expected an integer literal after 'addrspace'");
-  if (getUnsigned(Addrspace))
     return true;
   lex();
   return false;
@@ -2443,10 +2400,6 @@ bool MIParser::parseMachineMemoryOperand(MachineMemOperand *&Dest) {
     switch (Token.kind()) {
     case MIToken::kw_align:
       if (parseAlignment(BaseAlignment))
-        return true;
-      break;
-    case MIToken::kw_addrspace:
-      if (parseAddrspace(Ptr.AddrSpace))
         return true;
       break;
     case MIToken::md_tbaa:

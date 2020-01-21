@@ -75,7 +75,6 @@
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/Analysis/ScalarEvolutionNormalization.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
-#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/Constants.h"
@@ -106,8 +105,8 @@
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Scalar.h"
-#include "llvm/Transforms/Utils.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -186,8 +185,6 @@ struct MemAccessTy {
                                 unsigned AS = UnknownAddressSpace) {
     return MemAccessTy(Type::getVoidTy(Ctx), AS);
   }
-
-  Type *getType() { return MemTy; }
 };
 
 /// This class holds data which is used to order reuse candidates.
@@ -445,7 +442,7 @@ void Formula::initialMatch(const SCEV *S, Loop *L, ScalarEvolution &SE) {
   canonicalize(*L);
 }
 
-/// \brief Check whether or not this formula satisfies the canonical
+/// \brief Check whether or not this formula statisfies the canonical
 /// representation.
 /// \see Formula::BaseRegs.
 bool Formula::isCanonical(const Loop &L) const {
@@ -940,7 +937,7 @@ static bool isHighCostExpansion(const SCEV *S,
   return true;
 }
 
-/// If any of the instructions in the specified set are trivially dead, delete
+/// If any of the instructions is the specified set are trivially dead, delete
 /// them and see if this makes any of their operands subsequently dead.
 static bool
 DeleteTriviallyDeadInstructions(SmallVectorImpl<WeakTrackingVH> &DeadInsts) {
@@ -1043,14 +1040,12 @@ private:
   void RateRegister(const SCEV *Reg,
                     SmallPtrSetImpl<const SCEV *> &Regs,
                     const Loop *L,
-                    ScalarEvolution &SE, DominatorTree &DT,
-                    const TargetTransformInfo &TTI);
+                    ScalarEvolution &SE, DominatorTree &DT);
   void RatePrimaryRegister(const SCEV *Reg,
                            SmallPtrSetImpl<const SCEV *> &Regs,
                            const Loop *L,
                            ScalarEvolution &SE, DominatorTree &DT,
-                           SmallPtrSetImpl<const SCEV *> *LoserRegs,
-                           const TargetTransformInfo &TTI);
+                           SmallPtrSetImpl<const SCEV *> *LoserRegs);
 };
 
 /// An operand value in an instruction which is to be replaced with some
@@ -1199,8 +1194,7 @@ static bool isAMCompletelyFolded(const TargetTransformInfo &TTI,
 void Cost::RateRegister(const SCEV *Reg,
                         SmallPtrSetImpl<const SCEV *> &Regs,
                         const Loop *L,
-                        ScalarEvolution &SE, DominatorTree &DT,
-                        const TargetTransformInfo &TTI) {
+                        ScalarEvolution &SE, DominatorTree &DT) {
   if (const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(Reg)) {
     // If this is an addrec for another loop, it should be an invariant
     // with respect to L since L is the innermost loop (at least
@@ -1221,28 +1215,13 @@ void Cost::RateRegister(const SCEV *Reg,
       ++C.NumRegs;
       return;
     }
-
-    unsigned LoopCost = 1;
-    if (TTI.shouldFavorPostInc()) {
-      const SCEV *LoopStep = AR->getStepRecurrence(SE);
-      if (isa<SCEVConstant>(LoopStep)) {
-        // Check if a post-indexed load/store can be used.
-        if (TTI.isIndexedLoadLegal(TTI.MIM_PostInc, AR->getType()) ||
-            TTI.isIndexedStoreLegal(TTI.MIM_PostInc, AR->getType())) {
-          const SCEV *LoopStart = AR->getStart();
-          if (!isa<SCEVConstant>(LoopStart) &&
-            SE.isLoopInvariant(LoopStart, L))
-              LoopCost = 0;
-        }
-      }
-    }
-    C.AddRecCost += LoopCost;
+    C.AddRecCost += 1; /// TODO: This should be a function of the stride.
 
     // Add the step value register, if it needs one.
     // TODO: The non-affine case isn't precisely modeled here.
     if (!AR->isAffine() || !isa<SCEVConstant>(AR->getOperand(1))) {
       if (!Regs.count(AR->getOperand(1))) {
-        RateRegister(AR->getOperand(1), Regs, L, SE, DT, TTI);
+        RateRegister(AR->getOperand(1), Regs, L, SE, DT);
         if (isLoser())
           return;
       }
@@ -1270,14 +1249,13 @@ void Cost::RatePrimaryRegister(const SCEV *Reg,
                                SmallPtrSetImpl<const SCEV *> &Regs,
                                const Loop *L,
                                ScalarEvolution &SE, DominatorTree &DT,
-                               SmallPtrSetImpl<const SCEV *> *LoserRegs,
-                               const TargetTransformInfo &TTI) {
+                               SmallPtrSetImpl<const SCEV *> *LoserRegs) {
   if (LoserRegs && LoserRegs->count(Reg)) {
     Lose();
     return;
   }
   if (Regs.insert(Reg).second) {
-    RateRegister(Reg, Regs, L, SE, DT, TTI);
+    RateRegister(Reg, Regs, L, SE, DT);
     if (LoserRegs && isLoser())
       LoserRegs->insert(Reg);
   }
@@ -1301,7 +1279,7 @@ void Cost::RateFormula(const TargetTransformInfo &TTI,
       Lose();
       return;
     }
-    RatePrimaryRegister(ScaledReg, Regs, L, SE, DT, LoserRegs, TTI);
+    RatePrimaryRegister(ScaledReg, Regs, L, SE, DT, LoserRegs);
     if (isLoser())
       return;
   }
@@ -1310,7 +1288,7 @@ void Cost::RateFormula(const TargetTransformInfo &TTI,
       Lose();
       return;
     }
-    RatePrimaryRegister(BaseReg, Regs, L, SE, DT, LoserRegs, TTI);
+    RatePrimaryRegister(BaseReg, Regs, L, SE, DT, LoserRegs);
     if (isLoser())
       return;
   }
@@ -1365,15 +1343,14 @@ void Cost::RateFormula(const TargetTransformInfo &TTI,
 
   // If ICmpZero formula ends with not 0, it could not be replaced by
   // just add or sub. We'll need to compare final result of AddRec.
-  // That means we'll need an additional instruction. But if the target can
-  // macro-fuse a compare with a branch, don't count this extra instruction.
+  // That means we'll need an additional instruction.
   // For -10 + {0, +, 1}:
   // i = i + 1;
   // cmp i, 10
   //
   // For {-10, +, 1}:
   // i = i + 1;
-  if (LU.Kind == LSRUse::ICmpZero && !F.hasZeroEnd() && !TTI.canMacroFuseCmp())
+  if (LU.Kind == LSRUse::ICmpZero && !F.hasZeroEnd())
     C.Insns++;
   // Each new AddRec adds 1 instruction to calculation.
   C.Insns += (C.AddRecCost - PrevAddRecCost);
@@ -3487,45 +3464,12 @@ static const SCEV *CollectSubexprs(const SCEV *S, const SCEVConstant *C,
   return S;
 }
 
-/// Return true if the SCEV represents a value that may end up as a
-/// post-increment operation.
-static bool mayUsePostIncMode(const TargetTransformInfo &TTI,
-                              LSRUse &LU, const SCEV *S, const Loop *L,
-                              ScalarEvolution &SE) {
-  if (LU.Kind != LSRUse::Address ||
-      !LU.AccessTy.getType()->isIntOrIntVectorTy())
-    return false;
-  const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(S);
-  if (!AR)
-    return false;
-  const SCEV *LoopStep = AR->getStepRecurrence(SE);
-  if (!isa<SCEVConstant>(LoopStep))
-    return false;
-  if (LU.AccessTy.getType()->getScalarSizeInBits() !=
-      LoopStep->getType()->getScalarSizeInBits())
-    return false;
-  // Check if a post-indexed load/store can be used.
-  if (TTI.isIndexedLoadLegal(TTI.MIM_PostInc, AR->getType()) ||
-      TTI.isIndexedStoreLegal(TTI.MIM_PostInc, AR->getType())) {
-    const SCEV *LoopStart = AR->getStart();
-    if (!isa<SCEVConstant>(LoopStart) && SE.isLoopInvariant(LoopStart, L))
-      return true;
-  }
-  return false;
-}
-
 /// \brief Helper function for LSRInstance::GenerateReassociations.
 void LSRInstance::GenerateReassociationsImpl(LSRUse &LU, unsigned LUIdx,
                                              const Formula &Base,
                                              unsigned Depth, size_t Idx,
                                              bool IsScaledReg) {
   const SCEV *BaseReg = IsScaledReg ? Base.ScaledReg : Base.BaseRegs[Idx];
-  // Don't generate reassociations for the base register of a value that
-  // may generate a post-increment operator. The reason is that the
-  // reassociations cause extra base+register formula to be created,
-  // and possibly chosen, but the post-increment is more efficient.
-  if (TTI.shouldFavorPostInc() && mayUsePostIncMode(TTI, LU, BaseReg, L, SE))
-    return;
   SmallVector<const SCEV *, 8> AddOps;
   const SCEV *Remainder = CollectSubexprs(BaseReg, nullptr, AddOps, L, SE);
   if (Remainder)
@@ -4094,9 +4038,6 @@ void LSRInstance::GenerateCrossUseConstantOffsets() {
           NewF.BaseOffset = (uint64_t)NewF.BaseOffset + Imm;
           if (!isLegalUse(TTI, LU.MinOffset, LU.MaxOffset,
                           LU.Kind, LU.AccessTy, NewF)) {
-            if (TTI.shouldFavorPostInc() &&
-                mayUsePostIncMode(TTI, LU, OrigReg, this->L, SE))
-              continue;
             if (!TTI.isLegalAddImmediate((uint64_t)NewF.UnfoldedOffset + Imm))
               continue;
             NewF = F;
@@ -5052,7 +4993,7 @@ Value *LSRInstance::Expand(const LSRUse &LU, const LSRFixup &LF,
       // Unless the addressing mode will not be folded.
       if (!Ops.empty() && LU.Kind == LSRUse::Address &&
           isAMCompletelyFolded(TTI, LU, F)) {
-        Value *FullV = Rewriter.expandCodeFor(SE.getAddExpr(Ops), nullptr);
+        Value *FullV = Rewriter.expandCodeFor(SE.getAddExpr(Ops), Ty);
         Ops.clear();
         Ops.push_back(SE.getUnknown(FullV));
       }

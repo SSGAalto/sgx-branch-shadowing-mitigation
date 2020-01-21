@@ -227,12 +227,6 @@ bool PEI::runOnMachineFunction(MachineFunction &Fn) {
     DiagnosticInfoStackSize DiagStackSize(F, StackSize);
     F.getContext().diagnose(DiagStackSize);
   }
-  ORE->emit([&]() {
-    return MachineOptimizationRemarkAnalysis(DEBUG_TYPE, "StackSize",
-                                             Fn.getFunction().getSubprogram(),
-                                             &Fn.front())
-           << ore::NV("NumStackBytes", StackSize) << " stack bytes in function";
-  });
 
   delete RS;
   SaveBlocks.clear();
@@ -955,6 +949,13 @@ void PEI::calculateFrameObjectOffsets(MachineFunction &Fn) {
   int64_t StackSize = Offset - LocalAreaOffset;
   MFI.setStackSize(StackSize);
   NumBytesStackSpace += StackSize;
+
+  ORE->emit([&]() {
+    return MachineOptimizationRemarkAnalysis(DEBUG_TYPE, "StackSize",
+                                             Fn.getFunction().getSubprogram(),
+                                             &Fn.front())
+           << ore::NV("NumStackBytes", StackSize) << " stack bytes in function";
+  });
 }
 
 /// insertPrologEpilogCode - Scan the function for modified callee saved

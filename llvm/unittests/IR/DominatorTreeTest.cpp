@@ -264,14 +264,14 @@ TEST(DominatorTree, Unreachable) {
         EXPECT_EQ(DT->getNode(BB4)->getLevel(), 1U);
 
         // Change root node
-        EXPECT_TRUE(DT->verify());
+        DT->verifyDomTree();
         BasicBlock *NewEntry =
             BasicBlock::Create(F.getContext(), "new_entry", &F, BB0);
         BranchInst::Create(BB0, NewEntry);
         EXPECT_EQ(F.begin()->getName(), NewEntry->getName());
         EXPECT_TRUE(&F.getEntryBlock() == NewEntry);
         DT->setNewRoot(NewEntry);
-        EXPECT_TRUE(DT->verify());
+        DT->verifyDomTree();
       });
 }
 
@@ -820,6 +820,36 @@ TEST(DominatorTree, DeleteUnreachable) {
     PDT.deleteEdge(From, To);
     EXPECT_TRUE(PDT.verify());
   }
+}
+
+TEST(DominatorTree, DeletionsInSubtrees) {
+  CFGHolder Holder;
+  std::vector<CFGBuilder::Arc> Arcs = {{"0", "1"}, {"1", "2"}, {"1", "3"},
+                                       {"1", "6"}, {"3", "4"}, {"2", "5"},
+                                       {"5", "2"}};
+
+  // It is possible to perform multiple deletions and inform the
+  // DominatorTree about them at the same time, if the all of the
+  // deletions happen in different subtrees.
+  std::vector<CFGBuilder::Update> Updates = {{Delete, {"1", "2"}},
+                                             {Delete, {"1", "3"}}};
+  CFGBuilder B(Holder.F, Arcs, Updates);
+  DominatorTree DT(*Holder.F);
+  EXPECT_TRUE(DT.verify());
+
+  Optional<CFGBuilder::Update> LastUpdate;
+  while ((LastUpdate = B.applyUpdate()))
+    ;
+
+  DT.deleteEdge(B.getOrAddBlock("1"), B.getOrAddBlock("2"));
+  DT.deleteEdge(B.getOrAddBlock("1"), B.getOrAddBlock("3"));
+
+  EXPECT_TRUE(DT.verify());
+  EXPECT_EQ(DT.getNode(B.getOrAddBlock("2")), nullptr);
+  EXPECT_EQ(DT.getNode(B.getOrAddBlock("3")), nullptr);
+  EXPECT_EQ(DT.getNode(B.getOrAddBlock("4")), nullptr);
+  EXPECT_EQ(DT.getNode(B.getOrAddBlock("5")), nullptr);
+  EXPECT_NE(DT.getNode(B.getOrAddBlock("6")), nullptr);
 }
 
 TEST(DominatorTree, InsertDelete) {

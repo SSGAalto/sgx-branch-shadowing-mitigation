@@ -57,10 +57,6 @@ public:
 } // end anonymous namespace
 
 char WebAssemblyCFGStackify::ID = 0;
-INITIALIZE_PASS(WebAssemblyCFGStackify, DEBUG_TYPE,
-                "Insert BLOCK and LOOP markers for WebAssembly scopes",
-                false, false)
-
 FunctionPass *llvm::createWebAssemblyCFGStackify() {
   return new WebAssemblyCFGStackify();
 }
@@ -147,9 +143,9 @@ static void PlaceBlockMarker(
   }
 
   // Add the BLOCK.
-  MachineInstr *Begin = BuildMI(*Header, InsertPos, MBB.findDebugLoc(InsertPos),
+  MachineInstr *Begin = BuildMI(*Header, InsertPos, DebugLoc(),
                                 TII.get(WebAssembly::BLOCK))
-                            .addImm(int64_t(WebAssembly::ExprType::Void));
+      .addImm(int64_t(WebAssembly::ExprType::Void));
 
   // Mark the end of the block.
   InsertPos = MBB.begin();
@@ -157,7 +153,7 @@ static void PlaceBlockMarker(
          InsertPos->getOpcode() == WebAssembly::END_LOOP &&
          LoopTops[&*InsertPos]->getParent()->getNumber() >= Header->getNumber())
     ++InsertPos;
-  MachineInstr *End = BuildMI(MBB, InsertPos, MBB.findPrevDebugLoc(InsertPos),
+  MachineInstr *End = BuildMI(MBB, InsertPos, DebugLoc(),
                               TII.get(WebAssembly::END_BLOCK));
   BlockTops[End] = Begin;
 
@@ -197,14 +193,12 @@ static void PlaceLoopMarker(
   while (InsertPos != MBB.end() &&
          InsertPos->getOpcode() == WebAssembly::END_LOOP)
     ++InsertPos;
-  MachineInstr *Begin = BuildMI(MBB, InsertPos, MBB.findDebugLoc(InsertPos),
+  MachineInstr *Begin = BuildMI(MBB, InsertPos, DebugLoc(),
                                 TII.get(WebAssembly::LOOP))
-                            .addImm(int64_t(WebAssembly::ExprType::Void));
+      .addImm(int64_t(WebAssembly::ExprType::Void));
 
-  // Mark the end of the loop (using arbitrary debug location that branched
-  // to the loop end as its location).
-  DebugLoc EndDL = (*AfterLoop->pred_rbegin())->findBranchDebugLoc();
-  MachineInstr *End = BuildMI(*AfterLoop, AfterLoop->begin(), EndDL,
+  // Mark the end of the loop.
+  MachineInstr *End = BuildMI(*AfterLoop, AfterLoop->begin(), DebugLoc(),
                               TII.get(WebAssembly::END_LOOP));
   LoopTops[End] = Begin;
 
@@ -255,7 +249,6 @@ static void FixEndsAtEndOfFunction(
   case MVT::v8i16: retType = WebAssembly::ExprType::I16x8; break;
   case MVT::v4i32: retType = WebAssembly::ExprType::I32x4; break;
   case MVT::v4f32: retType = WebAssembly::ExprType::F32x4; break;
-  case MVT::ExceptRef: retType = WebAssembly::ExprType::ExceptRef; break;
   default: llvm_unreachable("unexpected return type");
   }
 
@@ -282,8 +275,7 @@ static void FixEndsAtEndOfFunction(
 static void AppendEndToFunction(
     MachineFunction &MF,
     const WebAssemblyInstrInfo &TII) {
-  BuildMI(MF.back(), MF.back().end(),
-          MF.back().findPrevDebugLoc(MF.back().end()),
+  BuildMI(MF.back(), MF.back().end(), DebugLoc(),
           TII.get(WebAssembly::END_FUNCTION));
 }
 

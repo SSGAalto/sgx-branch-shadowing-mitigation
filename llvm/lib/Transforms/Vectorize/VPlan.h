@@ -42,10 +42,15 @@
 #include <map>
 #include <string>
 
-namespace llvm {
-
+// The (re)use of existing LoopVectorize classes is subject to future VPlan
+// refactoring.
+namespace {
 class LoopVectorizationLegality;
 class LoopVectorizationCostModel;
+} // namespace
+
+namespace llvm {
+
 class BasicBlock;
 class DominatorTree;
 class InnerLoopVectorizer;

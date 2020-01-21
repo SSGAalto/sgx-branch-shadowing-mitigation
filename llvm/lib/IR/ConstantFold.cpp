@@ -1009,17 +1009,8 @@ Constant *llvm::ConstantFoldBinaryInstruction(unsigned Opcode,
     case Instruction::FMul:
     case Instruction::FDiv:
     case Instruction::FRem:
-      // [any flop] undef, undef -> undef
-      if (isa<UndefValue>(C1) && isa<UndefValue>(C2))
-        return C1;
-      // [any flop] C, undef -> NaN
-      // [any flop] undef, C -> NaN
-      // We could potentially specialize NaN/Inf constants vs. 'normal'
-      // constants (possibly differently depending on opcode and operand). This
-      // would allow returning undef sometimes. But it is always safe to fold to
-      // NaN because we can choose the undef operand as NaN, and any FP opcode
-      // with a NaN operand will propagate NaN.
-      return ConstantFP::getNaN(C1->getType());
+      // TODO: UNDEF handling for binary float instructions.
+      return nullptr;
     case Instruction::BinaryOpsEnd:
       llvm_unreachable("Invalid BinaryOp");
     }
@@ -2027,16 +2018,8 @@ static bool isInBoundsIndices(ArrayRef<IndexTy> Idxs) {
 
   // If the first index is one and all the rest are zero, it's in bounds,
   // by the one-past-the-end rule.
-  if (auto *CI = dyn_cast<ConstantInt>(Idxs[0])) {
-    if (!CI->isOne())
-      return false;
-  } else {
-    auto *CV = cast<ConstantDataVector>(Idxs[0]);
-    CI = dyn_cast_or_null<ConstantInt>(CV->getSplatValue());
-    if (!CI || !CI->isOne())
-      return false;
-  }
-
+  if (!cast<ConstantInt>(Idxs[0])->isOne())
+    return false;
   for (unsigned i = 1, e = Idxs.size(); i != e; ++i)
     if (!cast<Constant>(Idxs[i])->isNullValue())
       return false;
@@ -2066,18 +2049,15 @@ Constant *llvm::ConstantFoldGetElementPtr(Type *PointeeTy, Constant *C,
                                           ArrayRef<Value *> Idxs) {
   if (Idxs.empty()) return C;
 
-  Type *GEPTy = GetElementPtrInst::getGEPReturnType(
-      C, makeArrayRef((Value *const *)Idxs.data(), Idxs.size()));
-
-  if (isa<UndefValue>(C))
+  if (isa<UndefValue>(C)) {
+    Type *GEPTy = GetElementPtrInst::getGEPReturnType(
+        C, makeArrayRef((Value * const *)Idxs.data(), Idxs.size()));
     return UndefValue::get(GEPTy);
+  }
 
   Constant *Idx0 = cast<Constant>(Idxs[0]);
   if (Idxs.size() == 1 && (Idx0->isNullValue() || isa<UndefValue>(Idx0)))
-    return GEPTy->isVectorTy() && !C->getType()->isVectorTy()
-               ? ConstantVector::getSplat(
-                     cast<VectorType>(GEPTy)->getNumElements(), C)
-               : C;
+    return C;
 
   if (C->isNullValue()) {
     bool isNull = true;

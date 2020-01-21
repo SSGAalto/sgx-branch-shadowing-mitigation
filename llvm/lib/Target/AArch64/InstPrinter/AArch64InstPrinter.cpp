@@ -907,13 +907,20 @@ void AArch64InstPrinter::printAddSubImm(const MCInst *MI, unsigned OpNum,
   }
 }
 
-template <typename T>
-void AArch64InstPrinter::printLogicalImm(const MCInst *MI, unsigned OpNum,
-                                         const MCSubtargetInfo &STI,
-                                         raw_ostream &O) {
+void AArch64InstPrinter::printLogicalImm32(const MCInst *MI, unsigned OpNum,
+                                           const MCSubtargetInfo &STI,
+                                           raw_ostream &O) {
   uint64_t Val = MI->getOperand(OpNum).getImm();
   O << "#0x";
-  O.write_hex(AArch64_AM::decodeLogicalImmediate(Val, 8 * sizeof(T)));
+  O.write_hex(AArch64_AM::decodeLogicalImmediate(Val, 32));
+}
+
+void AArch64InstPrinter::printLogicalImm64(const MCInst *MI, unsigned OpNum,
+                                           const MCSubtargetInfo &STI,
+                                           raw_ostream &O) {
+  uint64_t Val = MI->getOperand(OpNum).getImm();
+  O << "#0x";
+  O.write_hex(AArch64_AM::decodeLogicalImmediate(Val, 64));
 }
 
 void AArch64InstPrinter::printShifter(const MCInst *MI, unsigned OpNum,
@@ -1331,16 +1338,6 @@ void AArch64InstPrinter::printComplexRotationOp(const MCInst *MI, unsigned OpNo,
                                                 raw_ostream &O) {
   unsigned Val = MI->getOperand(OpNo).getImm();
   O << "#" << (Val * Angle) + Remainder;
-}
-
-void AArch64InstPrinter::printSVEPattern(const MCInst *MI, unsigned OpNum,
-                                         const MCSubtargetInfo &STI,
-                                         raw_ostream &O) {
-  unsigned Val = MI->getOperand(OpNum).getImm();
-  if (auto Pat = AArch64SVEPredPattern::lookupSVEPREDPATByEncoding(Val))
-    O << Pat->Name;
-  else
-    O << '#' << formatImm(Val);
 }
 
 template <char suffix>

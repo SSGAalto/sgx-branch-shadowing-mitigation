@@ -31,8 +31,23 @@
 #ifdef HAVE_SYS_MMAN_H
 #include <sys/mman.h>
 #endif
+#if HAVE_DIRENT_H
+# include <dirent.h>
+# define NAMLEN(dirent) strlen((dirent)->d_name)
+#else
+# define dirent direct
+# define NAMLEN(dirent) (dirent)->d_namlen
+# if HAVE_SYS_NDIR_H
+#  include <sys/ndir.h>
+# endif
+# if HAVE_SYS_DIR_H
+#  include <sys/dir.h>
+# endif
+# if HAVE_NDIR_H
+#  include <ndir.h>
+# endif
+#endif
 
-#include <dirent.h>
 #include <pwd.h>
 
 #ifdef __APPLE__
@@ -628,9 +643,7 @@ std::error_code mapped_file_region::init(int FD, uint64_t Offset,
 
 mapped_file_region::mapped_file_region(int fd, mapmode mode, size_t length,
                                        uint64_t offset, std::error_code &ec)
-    : Size(length), Mapping(), FD(fd), Mode(mode) {
-  (void)FD;
-  (void)Mode;
+    : Size(length), Mapping() {
   ec = init(fd, offset, mode);
   if (ec)
     Mapping = nullptr;
@@ -689,7 +702,7 @@ std::error_code detail::directory_iterator_increment(detail::DirIterState &it) {
   if (cur_dir == nullptr && errno != 0) {
     return std::error_code(errno, std::generic_category());
   } else if (cur_dir != nullptr) {
-    StringRef name(cur_dir->d_name);
+    StringRef name(cur_dir->d_name, NAMLEN(cur_dir));
     if ((name.size() == 1 && name[0] == '.') ||
         (name.size() == 2 && name[0] == '.' && name[1] == '.'))
       return directory_iterator_increment(it);
@@ -777,7 +790,7 @@ std::error_code openFileForWrite(const Twine &Name, int &ResultFD,
 
   if (Flags & F_Append)
     OpenFlags |= O_APPEND;
-  else if (!(Flags & F_NoTrunc))
+  else
     OpenFlags |= O_TRUNC;
 
   if (Flags & F_Excl)
@@ -847,12 +860,12 @@ std::error_code real_path(const Twine &path, SmallVectorImpl<char> &dest,
     return real_path(Storage, dest, false);
   }
 
-  SmallString<128> Storage;
-  StringRef P = path.toNullTerminatedStringRef(Storage);
-  char Buffer[PATH_MAX];
-  if (::realpath(P.begin(), Buffer) == nullptr)
-    return std::error_code(errno, std::generic_category());
-  dest.append(Buffer, Buffer + strlen(Buffer));
+  int fd;
+  std::error_code EC = openFileForRead(path, fd, &dest);
+
+  if (EC)
+    return EC;
+  ::close(fd);
   return std::error_code();
 }
 

@@ -345,7 +345,6 @@ void SIFoldOperands::foldOperand(
     // Don't fold into target independent nodes.  Target independent opcodes
     // don't have defined register classes.
     if (UseDesc.isVariadic() ||
-        UseOp.isImplicit() ||
         UseDesc.OpInfo[UseOpIdx].RegClass == -1)
       return;
   }
@@ -471,8 +470,7 @@ static MachineOperand *getImmOrMaterializedImm(MachineRegisterInfo &MRI,
                                                MachineOperand &Op) {
   if (Op.isReg()) {
     // If this has a subregister, it obviously is a register source.
-    if (Op.getSubReg() != AMDGPU::NoSubRegister ||
-        !TargetRegisterInfo::isVirtualRegister(Op.getReg()))
+    if (Op.getSubReg() != AMDGPU::NoSubRegister)
       return &Op;
 
     MachineInstr *Def = MRI.getVRegDef(Op.getReg());

@@ -48,7 +48,6 @@
 #include "llvm/Analysis/MemorySSA.h"
 #include "llvm/Analysis/MemorySSAUpdater.h"
 #include "llvm/Analysis/PostDominators.h"
-#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/BasicBlock.h"
@@ -73,6 +72,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVN.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include <algorithm>
 #include <cassert>
 #include <iterator>
@@ -570,7 +570,7 @@ private:
   // The ides is inspired from:
   // "Partial Redundancy Elimination in SSA Form"
   // ROBERT KENNEDY, SUN CHAN, SHIN-MING LIU, RAYMOND LO, PENG TU and FRED CHOW
-  // They use similar idea in the forward graph to find fully redundant and
+  // They use similar idea in the forward graph to to find fully redundant and
   // partially redundant expressions, here it is used in the inverse graph to
   // find fully anticipable instructions at merge point (post-dominator in
   // the inverse CFG).
@@ -1200,7 +1200,6 @@ INITIALIZE_PASS_BEGIN(GVNHoistLegacyPass, "gvn-hoist",
 INITIALIZE_PASS_DEPENDENCY(MemoryDependenceWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(MemorySSAWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
-INITIALIZE_PASS_DEPENDENCY(PostDominatorTreeWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
 INITIALIZE_PASS_END(GVNHoistLegacyPass, "gvn-hoist",
                     "Early GVN Hoisting of Expressions", false, false)

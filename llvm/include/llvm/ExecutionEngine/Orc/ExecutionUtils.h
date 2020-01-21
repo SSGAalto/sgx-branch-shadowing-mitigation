@@ -17,14 +17,13 @@
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/ExecutionEngine/JITSymbol.h"
-#include "llvm/ExecutionEngine/Orc/Core.h"
-#include "llvm/ExecutionEngine/Orc/OrcError.h"
 #include "llvm/ExecutionEngine/RuntimeDyld.h"
+#include "llvm/ExecutionEngine/Orc/OrcError.h"
 #include <algorithm>
 #include <cstdint>
 #include <string>
-#include <utility>
 #include <vector>
+#include <utility>
 
 namespace llvm {
 
@@ -96,16 +95,17 @@ class CtorDtorRunner {
 public:
   /// @brief Construct a CtorDtorRunner for the given range using the given
   ///        name mangling function.
-  CtorDtorRunner(std::vector<std::string> CtorDtorNames, VModuleKey K)
-      : CtorDtorNames(std::move(CtorDtorNames)), K(K) {}
+  CtorDtorRunner(std::vector<std::string> CtorDtorNames,
+                 typename JITLayerT::ModuleHandleT H)
+      : CtorDtorNames(std::move(CtorDtorNames)), H(H) {}
 
   /// @brief Run the recorded constructors/destructors through the given JIT
   ///        layer.
   Error runViaLayer(JITLayerT &JITLayer) const {
     using CtorDtorTy = void (*)();
 
-    for (const auto &CtorDtorName : CtorDtorNames) {
-      if (auto CtorDtorSym = JITLayer.findSymbolIn(K, CtorDtorName, false)) {
+    for (const auto &CtorDtorName : CtorDtorNames)
+      if (auto CtorDtorSym = JITLayer.findSymbolIn(H, CtorDtorName, false)) {
         if (auto AddrOrErr = CtorDtorSym.getAddress()) {
           CtorDtorTy CtorDtor =
             reinterpret_cast<CtorDtorTy>(static_cast<uintptr_t>(*AddrOrErr));
@@ -118,13 +118,12 @@ public:
         else
           return make_error<JITSymbolNotFound>(CtorDtorName);
       }
-    }
     return Error::success();
   }
 
 private:
   std::vector<std::string> CtorDtorNames;
-  orc::VModuleKey K;
+  typename JITLayerT::ModuleHandleT H;
 };
 
 /// @brief Support class for static dtor execution. For hosted (in-process) JITs

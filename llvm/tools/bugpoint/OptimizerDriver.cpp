@@ -43,14 +43,18 @@ static cl::opt<bool> PreserveBitcodeUseListOrder(
     cl::desc("Preserve use-list order when writing LLVM bitcode."),
     cl::init(true), cl::Hidden);
 
+// ChildOutput - This option captures the name of the child output file that
+// is set up by the parent bugpoint process
+static cl::opt<std::string> ChildOutput("child-output", cl::ReallyHidden);
 static cl::opt<std::string>
     OptCmd("opt-command", cl::init(""),
            cl::desc("Path to opt. (default: search path "
                     "for 'opt'.)"));
 
-/// This writes the current "Program" to the named bitcode file.  If an error
-/// occurs, true is returned.
-static bool writeProgramToFileAux(ToolOutputFile &Out, const Module &M) {
+/// writeProgramToFile - This writes the current "Program" to the named bitcode
+/// file.  If an error occurs, true is returned.
+///
+static bool writeProgramToFileAux(ToolOutputFile &Out, const Module *M) {
   WriteBitcodeToFile(M, Out.os(), PreserveBitcodeUseListOrder);
   Out.os().close();
   if (!Out.os().has_error()) {
@@ -61,12 +65,12 @@ static bool writeProgramToFileAux(ToolOutputFile &Out, const Module &M) {
 }
 
 bool BugDriver::writeProgramToFile(const std::string &Filename, int FD,
-                                   const Module &M) const {
+                                   const Module *M) const {
   ToolOutputFile Out(Filename, FD);
   return writeProgramToFileAux(Out, M);
 }
 
-bool BugDriver::writeProgramToFile(int FD, const Module &M) const {
+bool BugDriver::writeProgramToFile(int FD, const Module *M) const {
   raw_fd_ostream OS(FD, /*shouldClose*/ false);
   WriteBitcodeToFile(M, OS, PreserveBitcodeUseListOrder);
   OS.flush();
@@ -77,7 +81,7 @@ bool BugDriver::writeProgramToFile(int FD, const Module &M) const {
 }
 
 bool BugDriver::writeProgramToFile(const std::string &Filename,
-                                   const Module &M) const {
+                                   const Module *M) const {
   std::error_code EC;
   ToolOutputFile Out(Filename, EC, sys::fs::F_None);
   if (!EC)
@@ -85,9 +89,10 @@ bool BugDriver::writeProgramToFile(const std::string &Filename,
   return true;
 }
 
-/// This function is used to output the current Program to a file named
-/// "bugpoint-ID.bc".
-void BugDriver::EmitProgressBitcode(const Module &M, const std::string &ID,
+/// EmitProgressBitcode - This function is used to output the current Program
+/// to a file named "bugpoint-ID.bc".
+///
+void BugDriver::EmitProgressBitcode(const Module *M, const std::string &ID,
                                     bool NoFlyer) const {
   // Output the input to the current pass to a bitcode file, emit a message
   // telling the user how to reproduce it: opt -foo blah.bc
@@ -127,7 +132,7 @@ static cl::list<std::string> OptArgs("opt-args", cl::Positional,
 /// outs() a single line message indicating whether compilation was successful
 /// or failed.
 ///
-bool BugDriver::runPasses(Module &Program,
+bool BugDriver::runPasses(Module *Program,
                           const std::vector<std::string> &Passes,
                           std::string &OutputFilename, bool DeleteOutput,
                           bool Quiet, unsigned NumExtraArgs,
@@ -173,10 +178,6 @@ bool BugDriver::runPasses(Module &Program,
   }
   if (tool.empty()) {
     errs() << "Cannot find `opt' in PATH!\n";
-    return 1;
-  }
-  if (!sys::fs::exists(tool)) {
-    errs() << "Specified `opt' binary does not exist: " << tool << "\n";
     return 1;
   }
 
@@ -270,7 +271,7 @@ std::unique_ptr<Module>
 BugDriver::runPassesOn(Module *M, const std::vector<std::string> &Passes,
                        unsigned NumExtraArgs, const char *const *ExtraArgs) {
   std::string BitcodeResult;
-  if (runPasses(*M, Passes, BitcodeResult, false /*delete*/, true /*quiet*/,
+  if (runPasses(M, Passes, BitcodeResult, false /*delete*/, true /*quiet*/,
                 NumExtraArgs, ExtraArgs)) {
     return nullptr;
   }

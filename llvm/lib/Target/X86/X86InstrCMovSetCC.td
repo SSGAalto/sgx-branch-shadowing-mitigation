@@ -16,7 +16,7 @@
 // CMOV instructions.
 multiclass CMOV<bits<8> opc, string Mnemonic, PatLeaf CondNode> {
   let Uses = [EFLAGS], Predicates = [HasCMov], Constraints = "$src1 = $dst",
-      isCommutable = 1, SchedRW = [WriteCMOV] in {
+      isCommutable = 1, SchedRW = [WriteALU] in {
     def NAME#16rr
       : I<opc, MRMSrcReg, (outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
           !strconcat(Mnemonic, "{w}\t{$src2, $dst|$dst, $src2}"),
@@ -34,11 +34,11 @@ multiclass CMOV<bits<8> opc, string Mnemonic, PatLeaf CondNode> {
           !strconcat(Mnemonic, "{q}\t{$src2, $dst|$dst, $src2}"),
           [(set GR64:$dst,
                 (X86cmov GR64:$src1, GR64:$src2, CondNode, EFLAGS))],
-                IIC_CMOV64_RR>, TB;
+                IIC_CMOV32_RR>, TB;
   }
 
   let Uses = [EFLAGS], Predicates = [HasCMov], Constraints = "$src1 = $dst",
-      SchedRW = [WriteCMOVLd, ReadAfterLd] in {
+      SchedRW = [WriteALULd, ReadAfterLd] in {
     def NAME#16rm
       : I<opc, MRMSrcMem, (outs GR16:$dst), (ins GR16:$src1, i16mem:$src2),
           !strconcat(Mnemonic, "{w}\t{$src2, $dst|$dst, $src2}"),
@@ -55,7 +55,7 @@ multiclass CMOV<bits<8> opc, string Mnemonic, PatLeaf CondNode> {
       :RI<opc, MRMSrcMem, (outs GR64:$dst), (ins GR64:$src1, i64mem:$src2),
           !strconcat(Mnemonic, "{q}\t{$src2, $dst|$dst, $src2}"),
           [(set GR64:$dst, (X86cmov GR64:$src1, (loadi64 addr:$src2),
-                                    CondNode, EFLAGS))], IIC_CMOV64_RM>, TB;
+                                    CondNode, EFLAGS))], IIC_CMOV32_RM>, TB;
   } // Uses = [EFLAGS], Predicates = [HasCMov], Constraints = "$src1 = $dst"
 } // end multiclass
 
@@ -85,11 +85,11 @@ multiclass SETCC<bits<8> opc, string Mnemonic, PatLeaf OpNode> {
     def r    : I<opc, MRMXr,  (outs GR8:$dst), (ins),
                      !strconcat(Mnemonic, "\t$dst"),
                      [(set GR8:$dst, (X86setcc OpNode, EFLAGS))],
-                     IIC_SET_R>, TB, Sched<[WriteSETCC]>;
+                     IIC_SET_R>, TB, Sched<[WriteALU]>;
     def m    : I<opc, MRMXm,  (outs), (ins i8mem:$dst),
                      !strconcat(Mnemonic, "\t$dst"),
                      [(store (X86setcc OpNode, EFLAGS), addr:$dst)],
-                     IIC_SET_M>, TB, Sched<[WriteSETCCStore]>;
+                     IIC_SET_M>, TB, Sched<[WriteALU, WriteStore]>;
   } // Uses = [EFLAGS]
 }
 

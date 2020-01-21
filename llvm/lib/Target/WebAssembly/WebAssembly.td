@@ -32,15 +32,6 @@ def FeatureNontrappingFPToInt :
                        "HasNontrappingFPToInt", "true",
                        "Enable non-trapping float-to-int conversion operators">;
 
-def FeatureSignExt :
-      SubtargetFeature<"sign-ext",
-                       "HasSignExt", "true",
-                       "Enable sign extension operators">;
-
-def FeatureExceptionHandling :
-      SubtargetFeature<"exception-handling", "HasExceptionHandling", "true",
-                       "Enable Wasm exception handling">;
-
 //===----------------------------------------------------------------------===//
 // Architectures.
 //===----------------------------------------------------------------------===//
@@ -77,12 +68,6 @@ def : ProcessorModel<"bleeding-edge", NoSchedModel,
 // Target Declaration
 //===----------------------------------------------------------------------===//
 
-def WebAssemblyAsmParser : AsmParser {
-  // The physical register names are not in the binary format or asm text
-  let ShouldEmitMatchRegisterName = 0;
-}
-
 def WebAssembly : Target {
   let InstructionSet = WebAssemblyInstrInfo;
-  let AssemblyParsers  = [WebAssemblyAsmParser];
 }

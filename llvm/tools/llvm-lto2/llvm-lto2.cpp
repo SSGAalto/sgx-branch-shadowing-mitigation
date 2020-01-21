@@ -243,11 +243,7 @@ static int run(int argc, char **argv) {
 
   ThinBackend Backend;
   if (ThinLTODistributedIndexes)
-    Backend = createWriteIndexesThinBackend(/* OldPrefix */ "",
-                                            /* NewPrefix */ "",
-                                            /* ShouldEmitImportsFiles */ true,
-                                            /* LinkedObjectsFile */ nullptr,
-                                            /* OnWrite */ {});
+    Backend = createWriteIndexesThinBackend("", "", true, "");
   else
     Backend = createInProcessThinBackend(Threads);
   LTO Lto(std::move(Conf), std::move(Backend));
@@ -300,7 +296,8 @@ static int run(int argc, char **argv) {
     return llvm::make_unique<lto::NativeObjectStream>(std::move(S));
   };
 
-  auto AddBuffer = [&](size_t Task, std::unique_ptr<MemoryBuffer> MB) {
+  auto AddBuffer = [&](size_t Task, std::unique_ptr<MemoryBuffer> MB,
+                       StringRef Path) {
     *AddStream(Task)->OS << MB->getBuffer();
   };
 

@@ -132,12 +132,10 @@ AMDGPUSubtarget::AMDGPUSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
     EnableLoadStoreOpt(false),
     EnableUnsafeDSOffsetFolding(false),
     EnableSIScheduler(false),
-    EnableDS128(false),
     DumpCode(false),
 
     FP64(false),
     FMA(false),
-    MIMG_R128(false),
     IsGCN(false),
     GCN3Encoding(false),
     CIInsts(false),
@@ -151,7 +149,6 @@ AMDGPUSubtarget::AMDGPUSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
     HasMovrel(false),
     HasVGPRIndexMode(false),
     HasScalarStores(false),
-    HasScalarAtomics(false),
     HasInv2PiInlineImm(false),
     HasSDWA(false),
     HasSDWAOmod(false),
@@ -165,7 +162,6 @@ AMDGPUSubtarget::AMDGPUSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
     FlatGlobalInsts(false),
     FlatScratchInsts(false),
     AddNoCarryInsts(false),
-    HasUnpackedD16VMem(false),
 
     R600ALUInst(false),
     CaymanISA(false),
@@ -369,12 +365,12 @@ R600Subtarget::R600Subtarget(const Triple &TT, StringRef GPU, StringRef FS,
   TLInfo(TM, *this) {}
 
 SISubtarget::SISubtarget(const Triple &TT, StringRef GPU, StringRef FS,
-                         const GCNTargetMachine &TM)
+                         const TargetMachine &TM)
     : AMDGPUSubtarget(TT, GPU, FS, TM), InstrInfo(*this),
       FrameLowering(TargetFrameLowering::StackGrowsUp, getStackAlignment(), 0),
       TLInfo(TM, *this) {
   CallLoweringInfo.reset(new AMDGPUCallLowering(*getTargetLowering()));
-  Legalizer.reset(new AMDGPULegalizerInfo(*this, TM));
+  Legalizer.reset(new AMDGPULegalizerInfo());
 
   RegBankInfo.reset(new AMDGPURegisterBankInfo(*getRegisterInfo()));
   InstSelector.reset(new AMDGPUInstructionSelector(

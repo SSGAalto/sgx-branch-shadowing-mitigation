@@ -68,7 +68,6 @@
 #include "llvm/Analysis/LoopAccessAnalysis.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/LoopPass.h"
-#include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
@@ -86,7 +85,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Scalar.h"
-#include "llvm/Transforms/Utils.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 #include "llvm/Transforms/Utils/LoopVersioning.h"
 #include <cassert>
@@ -168,7 +166,6 @@ struct LoopVersioningLICM : public LoopPass {
     AU.addRequired<ScalarEvolutionWrapperPass>();
     AU.addPreserved<AAResultsWrapperPass>();
     AU.addPreserved<GlobalsAAWrapperPass>();
-    AU.addRequired<OptimizationRemarkEmitterWrapperPass>();
   }
 
   StringRef getPassName() const override { return "Loop Versioning for LICM"; }
@@ -181,7 +178,6 @@ struct LoopVersioningLICM : public LoopPass {
     LoadAndStoreCounter = 0;
     InvariantCounter = 0;
     IsReadOnlyLoop = true;
-    ORE = nullptr;
     CurAST.reset();
   }
 
@@ -211,7 +207,7 @@ private:
   Loop *CurLoop = nullptr;
 
   // AliasSet information for the current loop.
-  std::unique_ptr<AliasSetTracker> CurAST;
+  std::unique_ptr<AliasSetTracker> CurAST; 
 
   // Maximum loop nest threshold
   unsigned LoopDepthThreshold;
@@ -227,9 +223,6 @@ private:
 
   // Read only loop marker.
   bool IsReadOnlyLoop = true;
-
-  // OptimizationRemarkEmitter
-  OptimizationRemarkEmitter *ORE;
 
   bool isLegalForVersioning();
   bool legalLoopStructure();
@@ -410,19 +403,13 @@ bool LoopVersioningLICM::legalLoopInstructions() {
   LoadAndStoreCounter = 0;
   InvariantCounter = 0;
   IsReadOnlyLoop = true;
-  using namespace ore;
   // Iterate over loop blocks and instructions of each block and check
   // instruction safety.
   for (auto *Block : CurLoop->getBlocks())
     for (auto &Inst : *Block) {
       // If instruction is unsafe just return false.
-      if (!instructionSafeForVersioning(&Inst)) {
-        ORE->emit([&]() {
-          return OptimizationRemarkMissed(DEBUG_TYPE, "IllegalLoopInst", &Inst)
-                 << " Unsafe Loop Instruction";
-        });
+      if (!instructionSafeForVersioning(&Inst))
         return false;
-      }
     }
   // Get LoopAccessInfo from current loop.
   LAI = &LAA->getInfo(CurLoop);
@@ -435,15 +422,6 @@ bool LoopVersioningLICM::legalLoopInstructions() {
   if (LAI->getNumRuntimePointerChecks() >
       VectorizerParams::RuntimeMemoryCheckThreshold) {
     DEBUG(dbgs() << "    LAA: Runtime checks are more than threshold !!\n");
-    ORE->emit([&]() {
-      return OptimizationRemarkMissed(DEBUG_TYPE, "RuntimeCheck",
-                                      CurLoop->getStartLoc(),
-                                      CurLoop->getHeader())
-             << "Number of runtime checks "
-             << NV("RuntimeChecks", LAI->getNumRuntimePointerChecks())
-             << " exceeds threshold "
-             << NV("Threshold", VectorizerParams::RuntimeMemoryCheckThreshold);
-    });
     return false;
   }
   // Loop should have at least one invariant load or store instruction.
@@ -465,16 +443,6 @@ bool LoopVersioningLICM::legalLoopInstructions() {
                  << ((InvariantCounter * 100) / LoadAndStoreCounter) << "%\n");
     DEBUG(dbgs() << "    Invariant loads & store threshold: "
                  << InvariantThreshold << "%\n");
-    ORE->emit([&]() {
-      return OptimizationRemarkMissed(DEBUG_TYPE, "InvariantThreshold",
-                                      CurLoop->getStartLoc(),
-                                      CurLoop->getHeader())
-             << "Invariant load & store "
-             << NV("LoadAndStoreCounter",
-                   ((InvariantCounter * 100) / LoadAndStoreCounter))
-             << " are less then defined threshold "
-             << NV("Threshold", InvariantThreshold);
-    });
     return false;
   }
   return true;
@@ -496,7 +464,6 @@ bool LoopVersioningLICM::isLoopAlreadyVisited() {
 /// c) loop memory access legality.
 /// Return true if legal else returns false.
 bool LoopVersioningLICM::isLegalForVersioning() {
-  using namespace ore;
   DEBUG(dbgs() << "Loop: " << *CurLoop);
   // Make sure not re-visiting same loop again.
   if (isLoopAlreadyVisited()) {
@@ -508,12 +475,6 @@ bool LoopVersioningLICM::isLegalForVersioning() {
   if (!legalLoopStructure()) {
     DEBUG(
         dbgs() << "    Loop structure not suitable for LoopVersioningLICM\n\n");
-    ORE->emit([&]() {
-      return OptimizationRemarkMissed(DEBUG_TYPE, "IllegalLoopStruct",
-                                      CurLoop->getStartLoc(),
-                                      CurLoop->getHeader())
-             << " Unsafe Loop structure";
-    });
     return false;
   }
   // Check loop instruction leagality.
@@ -526,23 +487,10 @@ bool LoopVersioningLICM::isLegalForVersioning() {
   if (!legalLoopMemoryAccesses()) {
     DEBUG(dbgs()
           << "    Loop memory access not suitable for LoopVersioningLICM\n\n");
-    ORE->emit([&]() {
-      return OptimizationRemarkMissed(DEBUG_TYPE, "IllegalLoopMemoryAccess",
-                                      CurLoop->getStartLoc(),
-                                      CurLoop->getHeader())
-             << " Unsafe Loop memory access";
-    });
     return false;
   }
   // Loop versioning is feasible, return true.
   DEBUG(dbgs() << "    Loop Versioning found to be beneficial\n\n");
-  ORE->emit([&]() {
-    return OptimizationRemark(DEBUG_TYPE, "IsLegalForVersioning",
-                              CurLoop->getStartLoc(), CurLoop->getHeader())
-           << " Versioned loop for LICM."
-           << " Number of runtime checks we had to insert "
-           << NV("RuntimeChecks", LAI->getNumRuntimePointerChecks());
-  });
   return true;
 }
 
@@ -594,7 +542,6 @@ bool LoopVersioningLICM::runOnLoop(Loop *L, LPPassManager &LPM) {
   AA = &getAnalysis<AAResultsWrapperPass>().getAAResults();
   SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
   LAA = &getAnalysis<LoopAccessLegacyAnalysis>();
-  ORE = &getAnalysis<OptimizationRemarkEmitterWrapperPass>().getORE();
   LAI = nullptr;
   // Set Current Loop
   CurLoop = L;
@@ -645,7 +592,6 @@ INITIALIZE_PASS_DEPENDENCY(LoopAccessLegacyAnalysis)
 INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(LoopSimplify)
 INITIALIZE_PASS_DEPENDENCY(ScalarEvolutionWrapperPass)
-INITIALIZE_PASS_DEPENDENCY(OptimizationRemarkEmitterWrapperPass)
 INITIALIZE_PASS_END(LoopVersioningLICM, "loop-versioning-licm",
                     "Loop Versioning For LICM", false, false)
 

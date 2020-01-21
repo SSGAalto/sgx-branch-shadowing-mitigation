@@ -288,6 +288,9 @@ inl	(%dx), %eax
 
 //PR15455
 
+// permitted invalid memory forms	
+outs	(%rsi), (%dx) 
+// CHECK: outsw	(%rsi), %dx
 outsb	(%rsi), (%dx)
 // CHECK: outsb	(%rsi), %dx
 outsw	(%rsi), (%dx)
@@ -295,6 +298,8 @@ outsw	(%rsi), (%dx)
 outsl	(%rsi), (%dx)
 // CHECK: outsl	(%rsi), %dx
 
+ins	(%dx), %es:(%rdi)
+// CHECK: insw	%dx, %es:(%rdi)
 insb	(%dx), %es:(%rdi)
 // CHECK: insb	%dx, %es:(%rdi)
 insw	(%dx), %es:(%rdi)
@@ -1132,10 +1137,10 @@ mov %gs, (%rsi)  // CHECK: movw	%gs, (%rsi) # encoding: [0x8c,0x2e]
 	idiv	0x12345678,%eax
 
 // PR8524
-movd	%rax, %mm5 // CHECK: movq %rax, %mm5 # encoding: [0x48,0x0f,0x6e,0xe8]
-movd	%mm5, %rbx // CHECK: movq %mm5, %rbx # encoding: [0x48,0x0f,0x7e,0xeb]
-movq	%rax, %mm5 // CHECK: movq %rax, %mm5 # encoding: [0x48,0x0f,0x6e,0xe8]
-movq	%mm5, %rbx // CHECK: movq %mm5, %rbx # encoding: [0x48,0x0f,0x7e,0xeb]
+movd	%rax, %mm5 // CHECK: movd %rax, %mm5 # encoding: [0x48,0x0f,0x6e,0xe8]
+movd	%mm5, %rbx // CHECK: movd %mm5, %rbx # encoding: [0x48,0x0f,0x7e,0xeb]
+movq	%rax, %mm5 // CHECK: movd %rax, %mm5 # encoding: [0x48,0x0f,0x6e,0xe8]
+movq	%mm5, %rbx // CHECK: movd %mm5, %rbx # encoding: [0x48,0x0f,0x7e,0xeb]
 
 rex64 // CHECK: rex64 # encoding: [0x48]
 data16 // CHECK: data16 # encoding: [0x66]
@@ -1355,8 +1360,8 @@ pclmullqhqdq (%rdi), %xmm1
 pclmulqdq $0, (%rdi), %xmm1
 
 // PR10345
-// CHECK: nop
-// CHECK: encoding: [0x90]
+// CHECK: xchgq %rax, %rax
+// CHECK: encoding: [0x48,0x90]
 xchgq %rax, %rax
 
 // CHECK: xchgl %eax, %eax

@@ -321,50 +321,31 @@ template <> struct MDNodeKeyImpl<GenericDINode> : MDNodeOpsKey {
 };
 
 template <> struct MDNodeKeyImpl<DISubrange> {
-  Metadata *CountNode;
+  int64_t Count;
   int64_t LowerBound;
 
-  MDNodeKeyImpl(Metadata *CountNode, int64_t LowerBound)
-      : CountNode(CountNode), LowerBound(LowerBound) {}
+  MDNodeKeyImpl(int64_t Count, int64_t LowerBound)
+      : Count(Count), LowerBound(LowerBound) {}
   MDNodeKeyImpl(const DISubrange *N)
-      : CountNode(N->getRawCountNode()),
-        LowerBound(N->getLowerBound()) {}
+      : Count(N->getCount()), LowerBound(N->getLowerBound()) {}
 
   bool isKeyOf(const DISubrange *RHS) const {
-    if (LowerBound != RHS->getLowerBound())
-      return false;
-
-    if (auto *RHSCount = RHS->getCount().dyn_cast<ConstantInt*>())
-      if (auto *MD = dyn_cast<ConstantAsMetadata>(CountNode))
-        if (RHSCount->getSExtValue() ==
-            cast<ConstantInt>(MD->getValue())->getSExtValue())
-          return true;
-
-    return CountNode == RHS->getRawCountNode();
+    return Count == RHS->getCount() && LowerBound == RHS->getLowerBound();
   }
 
-  unsigned getHashValue() const {
-    if (auto *MD = dyn_cast<ConstantAsMetadata>(CountNode))
-      return hash_combine(cast<ConstantInt>(MD->getValue())->getSExtValue(),
-                          LowerBound);
-    return hash_combine(CountNode, LowerBound);
-  }
+  unsigned getHashValue() const { return hash_combine(Count, LowerBound); }
 };
 
 template <> struct MDNodeKeyImpl<DIEnumerator> {
   int64_t Value;
   MDString *Name;
-  bool IsUnsigned;
 
-  MDNodeKeyImpl(int64_t Value, bool IsUnsigned, MDString *Name)
-      : Value(Value), Name(Name), IsUnsigned(IsUnsigned) {}
+  MDNodeKeyImpl(int64_t Value, MDString *Name) : Value(Value), Name(Name) {}
   MDNodeKeyImpl(const DIEnumerator *N)
-      : Value(N->getValue()), Name(N->getRawName()),
-        IsUnsigned(N->isUnsigned()) {}
+      : Value(N->getValue()), Name(N->getRawName()) {}
 
   bool isKeyOf(const DIEnumerator *RHS) const {
-    return Value == RHS->getValue() && IsUnsigned == RHS->isUnsigned() &&
-           Name == RHS->getRawName();
+    return Value == RHS->getValue() && Name == RHS->getRawName();
   }
 
   unsigned getHashValue() const { return hash_combine(Value, Name); }
@@ -503,20 +484,18 @@ template <> struct MDNodeKeyImpl<DICompositeType> {
   Metadata *VTableHolder;
   Metadata *TemplateParams;
   MDString *Identifier;
-  Metadata *Discriminator;
 
   MDNodeKeyImpl(unsigned Tag, MDString *Name, Metadata *File, unsigned Line,
                 Metadata *Scope, Metadata *BaseType, uint64_t SizeInBits,
                 uint32_t AlignInBits, uint64_t OffsetInBits, unsigned Flags,
                 Metadata *Elements, unsigned RuntimeLang,
                 Metadata *VTableHolder, Metadata *TemplateParams,
-                MDString *Identifier, Metadata *Discriminator)
+                MDString *Identifier)
       : Tag(Tag), Name(Name), File(File), Line(Line), Scope(Scope),
         BaseType(BaseType), SizeInBits(SizeInBits), OffsetInBits(OffsetInBits),
         AlignInBits(AlignInBits), Flags(Flags), Elements(Elements),
         RuntimeLang(RuntimeLang), VTableHolder(VTableHolder),
-        TemplateParams(TemplateParams), Identifier(Identifier),
-        Discriminator(Discriminator) {}
+        TemplateParams(TemplateParams), Identifier(Identifier) {}
   MDNodeKeyImpl(const DICompositeType *N)
       : Tag(N->getTag()), Name(N->getRawName()), File(N->getRawFile()),
         Line(N->getLine()), Scope(N->getRawScope()),
@@ -525,8 +504,7 @@ template <> struct MDNodeKeyImpl<DICompositeType> {
         Flags(N->getFlags()), Elements(N->getRawElements()),
         RuntimeLang(N->getRuntimeLang()), VTableHolder(N->getRawVTableHolder()),
         TemplateParams(N->getRawTemplateParams()),
-        Identifier(N->getRawIdentifier()),
-        Discriminator(N->getRawDiscriminator()) {}
+        Identifier(N->getRawIdentifier()) {}
 
   bool isKeyOf(const DICompositeType *RHS) const {
     return Tag == RHS->getTag() && Name == RHS->getRawName() &&
@@ -539,8 +517,7 @@ template <> struct MDNodeKeyImpl<DICompositeType> {
            RuntimeLang == RHS->getRuntimeLang() &&
            VTableHolder == RHS->getRawVTableHolder() &&
            TemplateParams == RHS->getRawTemplateParams() &&
-           Identifier == RHS->getRawIdentifier() &&
-           Discriminator == RHS->getRawDiscriminator();
+           Identifier == RHS->getRawIdentifier();
   }
 
   unsigned getHashValue() const {
@@ -574,29 +551,26 @@ template <> struct MDNodeKeyImpl<DISubroutineType> {
 template <> struct MDNodeKeyImpl<DIFile> {
   MDString *Filename;
   MDString *Directory;
-  Optional<DIFile::ChecksumInfo<MDString *>> Checksum;
-  Optional<MDString *> Source;
+  DIFile::ChecksumKind CSKind;
+  MDString *Checksum;
 
   MDNodeKeyImpl(MDString *Filename, MDString *Directory,
-                Optional<DIFile::ChecksumInfo<MDString *>> Checksum,
-                Optional<MDString *> Source)
-      : Filename(Filename), Directory(Directory), Checksum(Checksum),
-        Source(Source) {}
+                DIFile::ChecksumKind CSKind, MDString *Checksum)
+      : Filename(Filename), Directory(Directory), CSKind(CSKind),
+        Checksum(Checksum) {}
   MDNodeKeyImpl(const DIFile *N)
       : Filename(N->getRawFilename()), Directory(N->getRawDirectory()),
-        Checksum(N->getRawChecksum()), Source(N->getRawSource()) {}
+        CSKind(N->getChecksumKind()), Checksum(N->getRawChecksum()) {}
 
   bool isKeyOf(const DIFile *RHS) const {
     return Filename == RHS->getRawFilename() &&
            Directory == RHS->getRawDirectory() &&
-           Checksum == RHS->getRawChecksum() &&
-           Source == RHS->getRawSource();
+           CSKind == RHS->getChecksumKind() &&
+           Checksum == RHS->getRawChecksum();
   }
 
   unsigned getHashValue() const {
-    return hash_combine(
-        Filename, Directory, Checksum ? Checksum->Kind : 0,
-        Checksum ? Checksum->Value : nullptr, Source.getValueOr(nullptr));
+    return hash_combine(Filename, Directory, CSKind, Checksum);
   }
 };
 
@@ -1355,18 +1329,9 @@ public:
   /// Destroy the ConstantArrays if they are not used.
   void dropTriviallyDeadConstantArrays();
 
-  mutable OptPassGate *OPG = nullptr;
-
-  /// \brief Access the object which can disable optional passes and individual
-  /// optimizations at compile time.
-  OptPassGate &getOptPassGate() const;
-
-  /// \brief Set the object which can disable optional passes and individual
-  /// optimizations at compile time.
-  ///
-  /// The lifetime of the object must be guaranteed to extend as long as the
-  /// LLVMContext is used by compilation.
-  void setOptPassGate(OptPassGate&);
+  /// \brief Access the object which manages optimization bisection for failure
+  /// analysis.
+  OptBisect &getOptBisect();
 };
 
 } // end namespace llvm

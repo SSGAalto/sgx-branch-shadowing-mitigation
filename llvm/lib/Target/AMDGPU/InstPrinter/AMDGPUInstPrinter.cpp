@@ -267,9 +267,6 @@ void AMDGPUInstPrinter::printRegOperand(unsigned RegNo, raw_ostream &O,
   case AMDGPU::FLAT_SCR:
     O << "flat_scratch";
     return;
-  case AMDGPU::XNACK_MASK:
-    O << "xnack_mask";
-    return;
   case AMDGPU::VCC_LO:
     O << "vcc_lo";
     return;
@@ -299,12 +296,6 @@ void AMDGPUInstPrinter::printRegOperand(unsigned RegNo, raw_ostream &O,
     return;
   case AMDGPU::FLAT_SCR_HI:
     O << "flat_scratch_hi";
-    return;
-  case AMDGPU::XNACK_MASK_LO:
-    O << "xnack_mask_lo";
-    return;
-  case AMDGPU::XNACK_MASK_HI:
-    O << "xnack_mask_hi";
     return;
   case AMDGPU::FP_REG:
   case AMDGPU::SP_REG:
@@ -374,16 +365,6 @@ void AMDGPUInstPrinter::printVOPDst(const MCInst *MI, unsigned OpNo,
     O << "_dpp ";
   else if (MII.get(MI->getOpcode()).TSFlags & SIInstrFlags::SDWA)
     O << "_sdwa ";
-  else
-    O << "_e32 ";
-
-  printOperand(MI, OpNo, STI, O);
-}
-
-void AMDGPUInstPrinter::printVINTRPDst(const MCInst *MI, unsigned OpNo,
-                                       const MCSubtargetInfo &STI, raw_ostream &O) {
-  if (AMDGPU::isSI(STI) || AMDGPU::isCI(STI))
-    O << " ";
   else
     O << "_e32 ";
 
@@ -1273,10 +1254,7 @@ void AMDGPUInstPrinter::printHwreg(const MCInst *MI, unsigned OpNo,
   const unsigned Width = ((SImm16 & WIDTH_M1_MASK_) >> WIDTH_M1_SHIFT_) + 1;
 
   O << "hwreg(";
-  unsigned Last = ID_SYMBOLIC_LAST_;
-  if (AMDGPU::isSI(STI) || AMDGPU::isCI(STI) || AMDGPU::isVI(STI))
-    Last = ID_SYMBOLIC_FIRST_GFX9_;
-  if (ID_SYMBOLIC_FIRST_ <= Id && Id < Last && IdSymbolic[Id]) {
+  if (ID_SYMBOLIC_FIRST_ <= Id && Id < ID_SYMBOLIC_LAST_) {
     O << IdSymbolic[Id];
   } else {
     O << Id;

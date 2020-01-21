@@ -61,9 +61,6 @@ public:
 } // End anonymous namespace
 
 char FixFunctionBitcasts::ID = 0;
-INITIALIZE_PASS(FixFunctionBitcasts, DEBUG_TYPE,
-                "Fix mismatching bitcasts for WebAssembly", false, false)
-
 ModulePass *llvm::createWebAssemblyFixFunctionBitcasts() {
   return new FixFunctionBitcasts();
 }

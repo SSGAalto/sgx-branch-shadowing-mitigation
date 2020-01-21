@@ -37,13 +37,6 @@ unsigned AMDGPURegisterInfo::getSubRegFromChannel(unsigned Channel) const {
   return SubRegs[Channel];
 }
 
-void AMDGPURegisterInfo::reserveRegisterTuples(BitVector &Reserved, unsigned Reg) const {
-  MCRegAliasIterator R(Reg, this, true);
-
-  for (; R.isValid(); ++R)
-    Reserved.set(*R);
-}
-
 #define GET_REGINFO_TARGET_DESC
 #include "AMDGPUGenRegisterInfo.inc"
 
@@ -82,6 +75,5 @@ const uint32_t *SIRegisterInfo::getCallPreservedMask(const MachineFunction &MF,
 }
 
 unsigned SIRegisterInfo::getFrameRegister(const MachineFunction &MF) const {
-  const SIMachineFunctionInfo *FuncInfo = MF.getInfo<SIMachineFunctionInfo>();
-  return FuncInfo->getFrameOffsetReg();
+  return AMDGPU::NoRegister;
 }

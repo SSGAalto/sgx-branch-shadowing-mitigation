@@ -53,6 +53,8 @@ void LLVMSetCurrentDebugLocation2(LLVMBuilderRef Bref, unsigned Line,
 
 struct LLVMDebugLocMetadata LLVMGetCurrentDebugLocation2(LLVMBuilderRef Bref);
 
+void LLVMSetSubprogram(LLVMValueRef Fn, LLVMMetadataRef SP);
+
 #ifdef __cplusplus
 }
 

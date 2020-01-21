@@ -1,4 +1,4 @@
-; RUN: opt < %s -analyze -basicaa -da -da-delinearize | FileCheck %s
+; RUN: opt < %s -analyze -basicaa -da | FileCheck %s
 
 ; ModuleID = 'Coupled.bc'
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64-S128"
@@ -13,7 +13,6 @@ define void @couple0([100 x i32]* %A, i32* %B, i32 %n) nounwind uwtable ssp {
 entry:
   br label %for.body
 
-; CHECK-LABEL: couple0
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - confused!
@@ -50,7 +49,6 @@ define void @couple1([100 x i32]* %A, i32* %B, i32 %n) nounwind uwtable ssp {
 entry:
   br label %for.body
 
-; CHECK-LABEL: couple1
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - consistent flow [-9]!
 ; CHECK: da analyze - confused!
@@ -87,9 +85,8 @@ define void @couple2([100 x i32]* %A, i32* %B, i32 %n) nounwind uwtable ssp {
 entry:
   br label %for.body
 
-; CHECK-LABEL: couple2
 ; CHECK: da analyze - none!
-; CHECK: da analyze - flow [<]!
+; CHECK: da analyze - flow [*|<]!
 ; CHECK: da analyze - confused!
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - confused!
@@ -126,7 +123,6 @@ define void @couple3([100 x i32]* %A, i32* %B, i32 %n) nounwind uwtable ssp {
 entry:
   br label %for.body
 
-; CHECK-LABEL: couple3
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - confused!
@@ -165,7 +161,6 @@ define void @couple4([100 x i32]* %A, i32* %B, i32 %n) nounwind uwtable ssp {
 entry:
   br label %for.body
 
-; CHECK-LABEL: couple4
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - flow [*|<]!
 ; CHECK: da analyze - confused!
@@ -205,7 +200,6 @@ define void @couple5([100 x i32]* %A, i32* %B, i32 %n) nounwind uwtable ssp {
 entry:
   br label %for.body
 
-; CHECK-LABEL: couple5
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - confused!
@@ -247,9 +241,8 @@ define void @couple6([100 x i32]* %A, i32* %B, i32 %n) nounwind uwtable ssp {
 entry:
   br label %for.body
 
-; CHECK-LABEL: couple6
 ; CHECK: da analyze - none!
-; CHECK: da analyze - flow [<]!
+; CHECK: da analyze - flow [=|<]!
 ; CHECK: da analyze - confused!
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - confused!
@@ -284,7 +277,6 @@ define void @couple7([100 x i32]* %A, i32* %B, i32 %n) nounwind uwtable ssp {
 entry:
   br label %for.body
 
-; CHECK-LABEL: couple7
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - confused!
@@ -321,7 +313,6 @@ define void @couple8([100 x i32]* %A, i32* %B, i32 %n) nounwind uwtable ssp {
 entry:
   br label %for.body
 
-; CHECK-LABEL: couple8
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - confused!
@@ -359,7 +350,6 @@ define void @couple9([100 x i32]* %A, i32* %B, i32 %n) nounwind uwtable ssp {
 entry:
   br label %for.body
 
-; CHECK-LABEL: couple9
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - confused!
@@ -397,9 +387,9 @@ define void @couple10([100 x i32]* %A, i32* %B, i32 %n) nounwind uwtable ssp {
 entry:
   br label %for.body
 
-; CHECK-LABEL: couple10
 ; CHECK: da analyze - none!
-; CHECK: da analyze - flow [>]!
+; CHECK: da analyze - flow [>] splitable!
+; CHECK: da analyze - split level = 1, iteration = 3!
 ; CHECK: da analyze - confused!
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - confused!
@@ -435,9 +425,9 @@ define void @couple11([100 x i32]* %A, i32* %B, i32 %n) nounwind uwtable ssp {
 entry:
   br label %for.body
 
-; CHECK-LABEL: couple11
 ; CHECK: da analyze - none!
-; CHECK: da analyze - flow [>]!
+; CHECK: da analyze - flow [=|<] splitable!
+; CHECK: da analyze - split level = 1, iteration = 9!
 ; CHECK: da analyze - confused!
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - confused!
@@ -473,9 +463,9 @@ define void @couple12([100 x i32]* %A, i32* %B, i32 %n) nounwind uwtable ssp {
 entry:
   br label %for.body
 
-; CHECK-LABEL: couple12
 ; CHECK: da analyze - none!
-; CHECK: da analyze - flow [>]!
+; CHECK: da analyze - flow [<] splitable!
+; CHECK: da analyze - split level = 1, iteration = 11!
 ; CHECK: da analyze - confused!
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - confused!
@@ -511,7 +501,6 @@ define void @couple13([100 x i32]* %A, i32* %B, i32 %n) nounwind uwtable ssp {
 entry:
   br label %for.body
 
-; CHECK-LABEL: couple13
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - confused!
@@ -548,9 +537,9 @@ define void @couple14([100 x [100 x i32]]* %A, i32* %B, i32 %n) nounwind uwtable
 entry:
   br label %for.body
 
-; CHECK-LABEL: couple14
 ; CHECK: da analyze - none!
-; CHECK: da analyze - flow [<]!
+; CHECK: da analyze - flow [=|<] splitable!
+; CHECK: da analyze - split level = 1, iteration = 9!
 ; CHECK: da analyze - confused!
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - confused!
@@ -586,7 +575,6 @@ define void @couple15([100 x [100 x i32]]* %A, i32* %B, i32 %n) nounwind uwtable
 entry:
   br label %for.body
 
-; CHECK-LABEL: couple15
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - confused!

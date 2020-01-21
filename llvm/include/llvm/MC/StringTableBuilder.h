@@ -23,7 +23,7 @@ class raw_ostream;
 /// \brief Utility for building string tables with deduplicated suffixes.
 class StringTableBuilder {
 public:
-  enum Kind { ELF, WinCOFF, MachO, RAW, DWARF };
+  enum Kind { ELF, WinCOFF, MachO, RAW };
 
 private:
   DenseMap<CachedHashStringRef, size_t> StringIndexMap;

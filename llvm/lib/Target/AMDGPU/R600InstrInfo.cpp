@@ -1082,8 +1082,7 @@ bool R600InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
 }
 
 void R600InstrInfo::reserveIndirectRegisters(BitVector &Reserved,
-                                             const MachineFunction &MF,
-                                             const R600RegisterInfo &TRI) const {
+                                             const MachineFunction &MF) const {
   const R600Subtarget &ST = MF.getSubtarget<R600Subtarget>();
   const R600FrameLowering *TFL = ST.getFrameLowering();
 
@@ -1094,9 +1093,11 @@ void R600InstrInfo::reserveIndirectRegisters(BitVector &Reserved,
     return;
 
   for (int Index = getIndirectIndexBegin(MF); Index <= End; ++Index) {
+    unsigned SuperReg = AMDGPU::R600_Reg128RegClass.getRegister(Index);
+    Reserved.set(SuperReg);
     for (unsigned Chan = 0; Chan < StackWidth; ++Chan) {
       unsigned Reg = AMDGPU::R600_TReg32RegClass.getRegister((4 * Index) + Chan);
-      TRI.reserveRegisterTuples(Reserved, Reg);
+      Reserved.set(Reg);
     }
   }
 }

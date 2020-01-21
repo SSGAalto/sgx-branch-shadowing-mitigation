@@ -20,7 +20,6 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/ExecutionEngine/JITSymbol.h"
-#include "llvm/ExecutionEngine/Orc/Core.h"
 #include "llvm/ExecutionEngine/Orc/IndirectionUtils.h"
 #include "llvm/ExecutionEngine/Orc/LambdaResolver.h"
 #include "llvm/ExecutionEngine/Orc/OrcError.h"
@@ -86,6 +85,8 @@ private:
     return LambdaMaterializer<MaterializerFtor>(std::move(M));
   }
 
+  using BaseLayerModuleHandleT = typename BaseLayerT::ModuleHandleT;
+
   // Provide type-erasure for the Modules and MemoryManagers.
   template <typename ResourceT>
   class ResourceOwner {
@@ -137,22 +138,18 @@ private:
   };
 
   struct LogicalDylib {
+    using SymbolResolverFtor = std::function<JITSymbol(const std::string&)>;
+
     struct SourceModuleEntry {
-      std::unique_ptr<Module> SourceMod;
+      std::shared_ptr<Module> SourceMod;
       std::set<Function*> StubsToClone;
     };
 
     using SourceModulesList = std::vector<SourceModuleEntry>;
     using SourceModuleHandle = typename SourceModulesList::size_type;
 
-    LogicalDylib() = default;
-
-    LogicalDylib(VModuleKey K, std::shared_ptr<SymbolResolver> BackingResolver,
-                 std::unique_ptr<IndirectStubsMgrT> StubsMgr)
-        : K(std::move(K)), BackingResolver(std::move(BackingResolver)),
-          StubsMgr(std::move(StubsMgr)) {}
-
-    SourceModuleHandle addSourceModule(std::unique_ptr<Module> M) {
+    SourceModuleHandle
+    addSourceModule(std::shared_ptr<Module> M) {
       SourceModuleHandle H = SourceModules.size();
       SourceModules.push_back(SourceModuleEntry());
       SourceModules.back().SourceMod = std::move(M);
@@ -171,8 +168,8 @@ private:
                          bool ExportedSymbolsOnly) {
       if (auto Sym = StubsMgr->findStub(Name, ExportedSymbolsOnly))
         return Sym;
-      for (auto BLK : BaseLayerVModuleKeys)
-        if (auto Sym = BaseLayer.findSymbolIn(BLK, Name, ExportedSymbolsOnly))
+      for (auto BLH : BaseLayerHandles)
+        if (auto Sym = BaseLayer.findSymbolIn(BLH, Name, ExportedSymbolsOnly))
           return Sym;
         else if (auto Err = Sym.takeError())
           return std::move(Err);
@@ -180,21 +177,25 @@ private:
     }
 
     Error removeModulesFromBaseLayer(BaseLayerT &BaseLayer) {
-      for (auto &BLK : BaseLayerVModuleKeys)
-        if (auto Err = BaseLayer.removeModule(BLK))
+      for (auto &BLH : BaseLayerHandles)
+        if (auto Err = BaseLayer.removeModule(BLH))
           return Err;
       return Error::success();
     }
 
-    VModuleKey K;
-    std::shared_ptr<SymbolResolver> BackingResolver;
+    std::shared_ptr<JITSymbolResolver> ExternalSymbolResolver;
     std::unique_ptr<IndirectStubsMgrT> StubsMgr;
     StaticGlobalRenamer StaticRenamer;
     SourceModulesList SourceModules;
-    std::vector<VModuleKey> BaseLayerVModuleKeys;
+    std::vector<BaseLayerModuleHandleT> BaseLayerHandles;
   };
 
+  using LogicalDylibList = std::list<LogicalDylib>;
+
 public:
+
+  /// @brief Handle to loaded module.
+  using ModuleHandleT = typename LogicalDylibList::iterator;
 
   /// @brief Module partitioning functor.
   using PartitioningFtor = std::function<std::set<Function*>(Function&)>;
@@ -203,59 +204,51 @@ public:
   using IndirectStubsManagerBuilderT =
       std::function<std::unique_ptr<IndirectStubsMgrT>()>;
 
-  using SymbolResolverGetter =
-      std::function<std::shared_ptr<SymbolResolver>(VModuleKey K)>;
-
-  using SymbolResolverSetter =
-      std::function<void(VModuleKey K, std::shared_ptr<SymbolResolver> R)>;
-
   /// @brief Construct a compile-on-demand layer instance.
-  CompileOnDemandLayer(ExecutionSession &ES, BaseLayerT &BaseLayer,
-                       SymbolResolverGetter GetSymbolResolver,
-                       SymbolResolverSetter SetSymbolResolver,
-                       PartitioningFtor Partition,
+  CompileOnDemandLayer(BaseLayerT &BaseLayer, PartitioningFtor Partition,
                        CompileCallbackMgrT &CallbackMgr,
                        IndirectStubsManagerBuilderT CreateIndirectStubsManager,
                        bool CloneStubsIntoPartitions = true)
-      : ES(ES), BaseLayer(BaseLayer),
-        GetSymbolResolver(std::move(GetSymbolResolver)),
-        SetSymbolResolver(std::move(SetSymbolResolver)),
-        Partition(std::move(Partition)), CompileCallbackMgr(CallbackMgr),
+      : BaseLayer(BaseLayer), Partition(std::move(Partition)),
+        CompileCallbackMgr(CallbackMgr),
         CreateIndirectStubsManager(std::move(CreateIndirectStubsManager)),
         CloneStubsIntoPartitions(CloneStubsIntoPartitions) {}
 
   ~CompileOnDemandLayer() {
     // FIXME: Report error on log.
     while (!LogicalDylibs.empty())
-      consumeError(removeModule(LogicalDylibs.begin()->first));
+      consumeError(removeModule(LogicalDylibs.begin()));
   }
 
   /// @brief Add a module to the compile-on-demand layer.
-  Error addModule(VModuleKey K, std::unique_ptr<Module> M) {
+  Expected<ModuleHandleT>
+  addModule(std::shared_ptr<Module> M,
+            std::shared_ptr<JITSymbolResolver> Resolver) {
 
-    assert(!LogicalDylibs.count(K) && "VModuleKey K already in use");
-    auto I = LogicalDylibs.insert(
-        LogicalDylibs.end(),
-        std::make_pair(K, LogicalDylib(K, GetSymbolResolver(K),
-                                       CreateIndirectStubsManager())));
+    LogicalDylibs.push_back(LogicalDylib());
+    auto &LD = LogicalDylibs.back();
+    LD.ExternalSymbolResolver = std::move(Resolver);
+    LD.StubsMgr = CreateIndirectStubsManager();
 
-    return addLogicalModule(I->second, std::move(M));
+    // Process each of the modules in this module set.
+    if (auto Err = addLogicalModule(LD, std::move(M)))
+      return std::move(Err);
+
+    return std::prev(LogicalDylibs.end());
   }
 
   /// @brief Add extra modules to an existing logical module.
-  Error addExtraModule(VModuleKey K, std::unique_ptr<Module> M) {
-    return addLogicalModule(LogicalDylibs[K], std::move(M));
+  Error addExtraModule(ModuleHandleT H, std::shared_ptr<Module> M) {
+    return addLogicalModule(*H, std::move(M));
   }
 
-  /// @brief Remove the module represented by the given key.
+  /// @brief Remove the module represented by the given handle.
   ///
   ///   This will remove all modules in the layers below that were derived from
-  /// the module represented by K.
-  Error removeModule(VModuleKey K) {
-    auto I = LogicalDylibs.find(K);
-    assert(I != LogicalDylibs.end() && "VModuleKey K not valid here");
-    auto Err = I->second.removeModulesFromBaseLayer(BaseLayer);
-    LogicalDylibs.erase(I);
+  /// the module represented by H.
+  Error removeModule(ModuleHandleT H) {
+    auto Err = H->removeModulesFromBaseLayer(BaseLayer);
+    LogicalDylibs.erase(H);
     return Err;
   }
 
@@ -264,10 +257,11 @@ public:
   /// @param ExportedSymbolsOnly If true, search only for exported symbols.
   /// @return A handle for the given named symbol, if it exists.
   JITSymbol findSymbol(StringRef Name, bool ExportedSymbolsOnly) {
-    for (auto &KV : LogicalDylibs) {
-      if (auto Sym = KV.second.StubsMgr->findStub(Name, ExportedSymbolsOnly))
+    for (auto LDI = LogicalDylibs.begin(), LDE = LogicalDylibs.end();
+         LDI != LDE; ++LDI) {
+      if (auto Sym = LDI->StubsMgr->findStub(Name, ExportedSymbolsOnly))
         return Sym;
-      if (auto Sym = findSymbolIn(KV.first, Name, ExportedSymbolsOnly))
+      if (auto Sym = findSymbolIn(LDI, Name, ExportedSymbolsOnly))
         return Sym;
       else if (auto Err = Sym.takeError())
         return std::move(Err);
@@ -277,10 +271,9 @@ public:
 
   /// @brief Get the address of a symbol provided by this layer, or some layer
   ///        below this one.
-  JITSymbol findSymbolIn(VModuleKey K, const std::string &Name,
+  JITSymbol findSymbolIn(ModuleHandleT H, const std::string &Name,
                          bool ExportedSymbolsOnly) {
-    assert(LogicalDylibs.count(K) && "VModuleKey K is not valid here");
-    return LogicalDylibs[K].findSymbol(BaseLayer, Name, ExportedSymbolsOnly);
+    return H->findSymbol(BaseLayer, Name, ExportedSymbolsOnly);
   }
 
   /// @brief Update the stub for the given function to point at FnBodyAddr.
@@ -309,7 +302,8 @@ public:
   }
 
 private:
-  Error addLogicalModule(LogicalDylib &LD, std::unique_ptr<Module> SrcMPtr) {
+
+  Error addLogicalModule(LogicalDylib &LD, std::shared_ptr<Module> SrcMPtr) {
 
     // Rename all static functions / globals to $static.X :
     // This will unique the names across all modules in the logical dylib,
@@ -460,49 +454,25 @@ private:
       return MaterializerErrors;
 
     // Build a resolver for the globals module and add it to the base layer.
-    auto LegacyLookup = [this, &LD](const std::string &Name) -> JITSymbol {
-      if (auto Sym = LD.StubsMgr->findStub(Name, false))
-        return Sym;
-      else if (auto Err = Sym.takeError())
-        return std::move(Err);
-
-      if (auto Sym = LD.findSymbol(BaseLayer, Name, false))
-        return Sym;
-      else if (auto Err = Sym.takeError())
-        return std::move(Err);
-
-      return nullptr;
-    };
-
-    auto GVsResolver = createSymbolResolver(
-        [&LD, LegacyLookup](SymbolFlagsMap &SymbolFlags,
-                            const SymbolNameSet &Symbols) {
-          auto NotFoundViaLegacyLookup =
-              lookupFlagsWithLegacyFn(SymbolFlags, Symbols, LegacyLookup);
-
-          if (!NotFoundViaLegacyLookup) {
-            logAllUnhandledErrors(NotFoundViaLegacyLookup.takeError(), errs(),
-                                  "CODLayer/GVsResolver flags lookup failed: ");
-            SymbolFlags.clear();
-            return SymbolNameSet();
-          }
-
-          return LD.BackingResolver->lookupFlags(SymbolFlags,
-                                                 *NotFoundViaLegacyLookup);
+    auto GVsResolver = createLambdaResolver(
+        [this, &LD](const std::string &Name) -> JITSymbol {
+          if (auto Sym = LD.StubsMgr->findStub(Name, false))
+            return Sym;
+          if (auto Sym = LD.findSymbol(BaseLayer, Name, false))
+            return Sym;
+          else if (auto Err = Sym.takeError())
+            return std::move(Err);
+          return LD.ExternalSymbolResolver->findSymbolInLogicalDylib(Name);
         },
-        [&LD, LegacyLookup](std::shared_ptr<AsynchronousSymbolQuery> Query,
-                            SymbolNameSet Symbols) {
-          auto NotFoundViaLegacyLookup =
-              lookupWithLegacyFn(*Query, Symbols, LegacyLookup);
-          return LD.BackingResolver->lookup(Query, NotFoundViaLegacyLookup);
+        [&LD](const std::string &Name) {
+          return LD.ExternalSymbolResolver->findSymbol(Name);
         });
 
-    SetSymbolResolver(LD.K, std::move(GVsResolver));
-
-    if (auto Err = BaseLayer.addModule(LD.K, std::move(GVsM)))
-      return Err;
-
-    LD.BaseLayerVModuleKeys.push_back(LD.K);
+    if (auto GVsHOrErr =
+          BaseLayer.addModule(std::move(GVsM), std::move(GVsResolver)))
+      LD.BaseLayerHandles.push_back(*GVsHOrErr);
+    else
+      return GVsHOrErr.takeError();
 
     return Error::success();
   }
@@ -531,11 +501,11 @@ private:
 
     JITTargetAddress CalledAddr = 0;
     auto Part = Partition(F);
-    if (auto PartKeyOrErr = emitPartition(LD, LMId, Part)) {
-      auto &PartKey = *PartKeyOrErr;
+    if (auto PartHOrErr = emitPartition(LD, LMId, Part)) {
+      auto &PartH = *PartHOrErr;
       for (auto *SubF : Part) {
         std::string FnName = mangle(SubF->getName(), SrcM.getDataLayout());
-        if (auto FnBodySym = BaseLayer.findSymbolIn(PartKey, FnName, false)) {
+        if (auto FnBodySym = BaseLayer.findSymbolIn(PartH, FnName, false)) {
           if (auto FnBodyAddrOrErr = FnBodySym.getAddress()) {
             JITTargetAddress FnBodyAddr = *FnBodyAddrOrErr;
 
@@ -556,15 +526,15 @@ private:
           llvm_unreachable("Function not emitted for partition");
       }
 
-      LD.BaseLayerVModuleKeys.push_back(PartKey);
+      LD.BaseLayerHandles.push_back(PartH);
     } else
-      return PartKeyOrErr.takeError();
+      return PartHOrErr.takeError();
 
     return CalledAddr;
   }
 
   template <typename PartitionT>
-  Expected<VModuleKey>
+  Expected<BaseLayerModuleHandleT>
   emitPartition(LogicalDylib &LD,
                 typename LogicalDylib::SourceModuleHandle LMId,
                 const PartitionT &Part) {
@@ -626,51 +596,28 @@ private:
     for (auto *F : Part)
       moveFunctionBody(*F, VMap, &Materializer);
 
-    auto K = ES.allocateVModule();
-
-    auto LegacyLookup = [this, &LD](const std::string &Name) -> JITSymbol {
-      return LD.findSymbol(BaseLayer, Name, false);
-    };
-
     // Create memory manager and symbol resolver.
-    auto Resolver = createSymbolResolver(
-        [&LD, LegacyLookup](SymbolFlagsMap &SymbolFlags,
-                            const SymbolNameSet &Symbols) {
-          auto NotFoundViaLegacyLookup =
-              lookupFlagsWithLegacyFn(SymbolFlags, Symbols, LegacyLookup);
-          if (!NotFoundViaLegacyLookup) {
-            logAllUnhandledErrors(NotFoundViaLegacyLookup.takeError(), errs(),
-                                  "CODLayer/SubResolver flags lookup failed: ");
-            SymbolFlags.clear();
-            return SymbolNameSet();
-          }
-          return LD.BackingResolver->lookupFlags(SymbolFlags,
-                                                 *NotFoundViaLegacyLookup);
+    auto Resolver = createLambdaResolver(
+        [this, &LD](const std::string &Name) -> JITSymbol {
+          if (auto Sym = LD.findSymbol(BaseLayer, Name, false))
+            return Sym;
+          else if (auto Err = Sym.takeError())
+            return std::move(Err);
+          return LD.ExternalSymbolResolver->findSymbolInLogicalDylib(Name);
         },
-        [&LD, LegacyLookup](std::shared_ptr<AsynchronousSymbolQuery> Q,
-                            SymbolNameSet Symbols) {
-          auto NotFoundViaLegacyLookup =
-              lookupWithLegacyFn(*Q, Symbols, LegacyLookup);
-          return LD.BackingResolver->lookup(Q,
-                                            std::move(NotFoundViaLegacyLookup));
+        [&LD](const std::string &Name) {
+          return LD.ExternalSymbolResolver->findSymbol(Name);
         });
-    SetSymbolResolver(K, std::move(Resolver));
 
-    if (auto Err = BaseLayer.addModule(std::move(K), std::move(M)))
-      return std::move(Err);
-
-    return K;
+    return BaseLayer.addModule(std::move(M), std::move(Resolver));
   }
 
-  ExecutionSession &ES;
   BaseLayerT &BaseLayer;
-  SymbolResolverGetter GetSymbolResolver;
-  SymbolResolverSetter SetSymbolResolver;
   PartitioningFtor Partition;
   CompileCallbackMgrT &CompileCallbackMgr;
   IndirectStubsManagerBuilderT CreateIndirectStubsManager;
 
-  std::map<VModuleKey, LogicalDylib> LogicalDylibs;
+  LogicalDylibList LogicalDylibs;
   bool CloneStubsIntoPartitions;
 };
 

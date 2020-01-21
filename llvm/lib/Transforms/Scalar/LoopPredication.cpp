@@ -155,7 +155,7 @@
 // When S = -1 (i.e. reverse iterating loop), the transformation is supported
 // when:
 //   * The loop has a single latch with the condition of the form:
-//     B(X) = X <pred> latchLimit, where <pred> is u>, u>=, s>, or s>=.
+//     B(X) = X <pred> latchLimit, where <pred> is u> or s>.
 //   * The guard condition is of the form
 //     G(X) = X - 1 u< guardLimit
 //
@@ -171,14 +171,9 @@
 //     guardStart u< guardLimit && latchLimit u>= 1.
 //   Similarly for sgt condition the widened condition is:
 //     guardStart u< guardLimit && latchLimit s>= 1.
-//   For uge condition the widened condition is:
-//     guardStart u< guardLimit && latchLimit u> 1.
-//   For sge condition the widened condition is:
-//     guardStart u< guardLimit && latchLimit s> 1.
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Scalar/LoopPredication.h"
-#include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/ScalarEvolution.h"
@@ -203,20 +198,6 @@ static cl::opt<bool> EnableIVTruncation("loop-predication-enable-iv-truncation",
 
 static cl::opt<bool> EnableCountDownLoop("loop-predication-enable-count-down-loop",
                                         cl::Hidden, cl::init(true));
-
-static cl::opt<bool>
-    SkipProfitabilityChecks("loop-predication-skip-profitability-checks",
-                            cl::Hidden, cl::init(false));
-
-// This is the scale factor for the latch probability. We use this during
-// profitability analysis to find other exiting blocks that have a much higher
-// probability of exiting the loop instead of loop exiting via latch.
-// This value should be greater than 1 for a sane profitability check.
-static cl::opt<float> LatchExitProbabilityScale(
-    "loop-predication-latch-probability-scale", cl::Hidden, cl::init(2.0),
-    cl::desc("scale factor for the latch probability. Value should be greater "
-             "than 1. Lower values are ignored"));
-
 namespace {
 class LoopPredication {
   /// Represents an induction variable check:
@@ -236,7 +217,6 @@ class LoopPredication {
   };
 
   ScalarEvolution *SE;
-  BranchProbabilityInfo *BPI;
 
   Loop *L;
   const DataLayout *DL;
@@ -270,12 +250,6 @@ class LoopPredication {
                                                         IRBuilder<> &Builder);
   bool widenGuardConditions(IntrinsicInst *II, SCEVExpander &Expander);
 
-  // If the loop always exits through another block in the loop, we should not
-  // predicate based on the latch check. For example, the latch check can be a
-  // very coarse grained check and there can be more fine grained exit checks
-  // within the loop. We identify such unprofitable loops through BPI.
-  bool isLoopProfitableToPredicate();
-
   // When the IV type is wider than the range operand type, we can still do loop
   // predication, by generating SCEVs for the range and latch that are of the
   // same type. We achieve this by generating a SCEV truncate expression for the
@@ -292,10 +266,8 @@ class LoopPredication {
   // Return the loopLatchCheck corresponding to the RangeCheckType if safe to do
   // so.
   Optional<LoopICmp> generateLoopLatchCheck(Type *RangeCheckType);
-
 public:
-  LoopPredication(ScalarEvolution *SE, BranchProbabilityInfo *BPI)
-      : SE(SE), BPI(BPI){};
+  LoopPredication(ScalarEvolution *SE) : SE(SE){};
   bool runOnLoop(Loop *L);
 };
 
@@ -307,7 +279,6 @@ public:
   }
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
-    AU.addRequired<BranchProbabilityInfoWrapperPass>();
     getLoopAnalysisUsage(AU);
   }
 
@@ -315,9 +286,7 @@ public:
     if (skipLoop(L))
       return false;
     auto *SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
-    BranchProbabilityInfo &BPI =
-        getAnalysis<BranchProbabilityInfoWrapperPass>().getBPI();
-    LoopPredication LP(SE, &BPI);
+    LoopPredication LP(SE);
     return LP.runOnLoop(L);
   }
 };
@@ -327,7 +296,6 @@ char LoopPredicationLegacyPass::ID = 0;
 
 INITIALIZE_PASS_BEGIN(LoopPredicationLegacyPass, "loop-predication",
                       "Loop predication", false, false)
-INITIALIZE_PASS_DEPENDENCY(BranchProbabilityInfoWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(LoopPass)
 INITIALIZE_PASS_END(LoopPredicationLegacyPass, "loop-predication",
                     "Loop predication", false, false)
@@ -339,11 +307,7 @@ Pass *llvm::createLoopPredicationPass() {
 PreservedAnalyses LoopPredicationPass::run(Loop &L, LoopAnalysisManager &AM,
                                            LoopStandardAnalysisResults &AR,
                                            LPMUpdater &U) {
-  const auto &FAM =
-      AM.getResult<FunctionAnalysisManagerLoopProxy>(L, AR).getManager();
-  Function *F = L.getHeader()->getParent();
-  auto *BPI = FAM.getCachedResult<BranchProbabilityAnalysis>(*F);
-  LoopPredication LP(&AR.SE, BPI);
+  LoopPredication LP(&AR.SE);
   if (!LP.runOnLoop(&L))
     return PreservedAnalyses::all();
 
@@ -451,8 +415,23 @@ Optional<Value *> LoopPredication::widenICmpRangeCheckIncrementingLoop(
     DEBUG(dbgs() << "Can't expand limit check!\n");
     return None;
   }
-  auto LimitCheckPred =
-      ICmpInst::getFlippedStrictnessPredicate(LatchCheck.Pred);
+  ICmpInst::Predicate LimitCheckPred;
+  switch (LatchCheck.Pred) {
+  case ICmpInst::ICMP_ULT:
+    LimitCheckPred = ICmpInst::ICMP_ULE;
+    break;
+  case ICmpInst::ICMP_ULE:
+    LimitCheckPred = ICmpInst::ICMP_ULT;
+    break;
+  case ICmpInst::ICMP_SLT:
+    LimitCheckPred = ICmpInst::ICMP_SLE;
+    break;
+  case ICmpInst::ICMP_SLE:
+    LimitCheckPred = ICmpInst::ICMP_SLT;
+    break;
+  default:
+    llvm_unreachable("Unsupported loop latch!");
+  }
 
   DEBUG(dbgs() << "LHS: " << *LatchLimit << "\n");
   DEBUG(dbgs() << "RHS: " << *RHS << "\n");
@@ -493,8 +472,9 @@ Optional<Value *> LoopPredication::widenICmpRangeCheckDecrementingLoop(
   // latchLimit <pred> 1.
   // See the header comment for reasoning of the checks.
   Instruction *InsertAt = Preheader->getTerminator();
-  auto LimitCheckPred =
-      ICmpInst::getFlippedStrictnessPredicate(LatchCheck.Pred);
+  auto LimitCheckPred = ICmpInst::isSigned(LatchCheck.Pred)
+                            ? ICmpInst::ICMP_SGE
+                            : ICmpInst::ICMP_UGE;
   auto *FirstIterationCheck = expandCheck(Expander, Builder, ICmpInst::ICMP_ULT,
                                           GuardStart, GuardLimit, InsertAt);
   auto *LimitCheck = expandCheck(Expander, Builder, LimitCheckPred, LatchLimit,
@@ -578,7 +558,7 @@ bool LoopPredication::widenGuardConditions(IntrinsicInst *Guard,
 
   // The guard condition is expected to be in form of:
   //   cond1 && cond2 && cond3 ...
-  // Iterate over subconditions looking for icmp conditions which can be
+  // Iterate over subconditions looking for for icmp conditions which can be
   // widened across loop iterations. Widening these conditions remember the
   // resulting list of subconditions in Checks vector.
   SmallVector<Value *, 4> Worklist(1, Guard->getOperand(0));
@@ -678,8 +658,7 @@ Optional<LoopPredication::LoopICmp> LoopPredication::parseLoopLatchICmp() {
              Pred != ICmpInst::ICMP_ULE && Pred != ICmpInst::ICMP_SLE;
     } else {
       assert(Step->isAllOnesValue() && "Step should be -1!");
-      return Pred != ICmpInst::ICMP_UGT && Pred != ICmpInst::ICMP_SGT &&
-             Pred != ICmpInst::ICMP_UGE && Pred != ICmpInst::ICMP_SGE;
+      return Pred != ICmpInst::ICMP_UGT && Pred != ICmpInst::ICMP_SGT;
     }
   };
 
@@ -721,60 +700,6 @@ bool LoopPredication::isSafeToTruncateWideIVType(Type *RangeCheckType) {
          Limit->getAPInt().getActiveBits() < RangeCheckTypeBitSize;
 }
 
-bool LoopPredication::isLoopProfitableToPredicate() {
-  if (SkipProfitabilityChecks || !BPI)
-    return true;
-
-  SmallVector<std::pair<const BasicBlock *, const BasicBlock *>, 8> ExitEdges;
-  L->getExitEdges(ExitEdges);
-  // If there is only one exiting edge in the loop, it is always profitable to
-  // predicate the loop.
-  if (ExitEdges.size() == 1)
-    return true;
-
-  // Calculate the exiting probabilities of all exiting edges from the loop,
-  // starting with the LatchExitProbability.
-  // Heuristic for profitability: If any of the exiting blocks' probability of
-  // exiting the loop is larger than exiting through the latch block, it's not
-  // profitable to predicate the loop.
-  auto *LatchBlock = L->getLoopLatch();
-  assert(LatchBlock && "Should have a single latch at this point!");
-  auto *LatchTerm = LatchBlock->getTerminator();
-  assert(LatchTerm->getNumSuccessors() == 2 &&
-         "expected to be an exiting block with 2 succs!");
-  unsigned LatchBrExitIdx =
-      LatchTerm->getSuccessor(0) == L->getHeader() ? 1 : 0;
-  BranchProbability LatchExitProbability =
-      BPI->getEdgeProbability(LatchBlock, LatchBrExitIdx);
-
-  // Protect against degenerate inputs provided by the user. Providing a value
-  // less than one, can invert the definition of profitable loop predication.
-  float ScaleFactor = LatchExitProbabilityScale;
-  if (ScaleFactor < 1) {
-    DEBUG(
-        dbgs()
-        << "Ignored user setting for loop-predication-latch-probability-scale: "
-        << LatchExitProbabilityScale << "\n");
-    DEBUG(dbgs() << "The value is set to 1.0\n");
-    ScaleFactor = 1.0;
-  }
-  const auto LatchProbabilityThreshold =
-      LatchExitProbability * ScaleFactor;
-
-  for (const auto &ExitEdge : ExitEdges) {
-    BranchProbability ExitingBlockProbability =
-        BPI->getEdgeProbability(ExitEdge.first, ExitEdge.second);
-    // Some exiting edge has higher probability than the latch exiting edge.
-    // No longer profitable to predicate.
-    if (ExitingBlockProbability > LatchProbabilityThreshold)
-      return false;
-  }
-  // Using BPI, we have concluded that the most probable way to exit from the
-  // loop is through the latch (or there's no profile information and all
-  // exits are equally likely).
-  return true;
-}
-
 bool LoopPredication::runOnLoop(Loop *Loop) {
   L = Loop;
 
@@ -803,10 +728,6 @@ bool LoopPredication::runOnLoop(Loop *Loop) {
   DEBUG(dbgs() << "Latch check:\n");
   DEBUG(LatchCheck.dump());
 
-  if (!isLoopProfitableToPredicate()) {
-    DEBUG(dbgs()<< "Loop not profitable to predicate!\n");
-    return false;
-  }
   // Collect all the guards into a vector and process later, so as not
   // to invalidate the instruction iterator.
   SmallVector<IntrinsicInst *, 4> Guards;

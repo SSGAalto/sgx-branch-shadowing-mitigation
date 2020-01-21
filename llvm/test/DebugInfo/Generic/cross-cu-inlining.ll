@@ -1,7 +1,7 @@
 ; REQUIRES: object-emission
 
 ; RUN: %llc_dwarf -O0 -filetype=obj -dwarf-linkage-names=All < %s | llvm-dwarfdump -v -debug-info - | FileCheck -implicit-check-not=DW_TAG %s
-; RUN: %llc_dwarf -accel-tables=Apple -dwarf-linkage-names=All -O0 -filetype=obj < %s | llvm-dwarfdump -v - | FileCheck --check-prefix=CHECK-ACCEL --check-prefix=CHECK %s
+; RUN: %llc_dwarf -dwarf-accel-tables=Enable -dwarf-linkage-names=All -O0 -filetype=obj < %s | llvm-dwarfdump -v - | FileCheck --check-prefix=CHECK-ACCEL --check-prefix=CHECK %s
 
 ; Build from source:
 ; $ clang++ a.cpp b.cpp -g -c -emit-llvm
@@ -57,10 +57,10 @@
 ; correctly referenced in the accelerator table. Before r221837, the one
 ; in the second compilation unit had a wrong offset
 ; CHECK-ACCEL: .apple_names contents:
-; CHECK-ACCEL: String{{.*}}"func"
-; CHECK-ACCEL-NOT: String
+; CHECK-ACCEL: Name{{.*}}"func"
+; CHECK-ACCEL-NOT: Name
 ; CHECK-ACCEL: Atom[0]{{.*}}[[INLINED]]
-; CHECK-ACCEL-NOT: String
+; CHECK-ACCEL-NOT: Name
 ; CHECK-ACCEL: Atom[0]{{.*}}[[FUNC]]
 
 @i = external global i32

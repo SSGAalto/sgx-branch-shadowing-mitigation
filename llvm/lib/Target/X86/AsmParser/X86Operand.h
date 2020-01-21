@@ -10,7 +10,6 @@
 #ifndef LLVM_LIB_TARGET_X86_ASMPARSER_X86OPERAND_H
 #define LLVM_LIB_TARGET_X86_ASMPARSER_X86OPERAND_H
 
-#include "InstPrinter/X86IntelInstPrinter.h"
 #include "MCTargetDesc/X86MCTargetDesc.h"
 #include "X86AsmParserCommon.h"
 #include "llvm/ADT/STLExtras.h"
@@ -78,7 +77,7 @@ struct X86Operand : public MCParsedAsmOperand {
   };
 
   X86Operand(KindTy K, SMLoc Start, SMLoc End)
-      : Kind(K), StartLoc(Start), EndLoc(End) {}
+    : Kind(K), StartLoc(Start), EndLoc(End) {}
 
   StringRef getSymName() override { return SymName; }
   void *getOpDecl() override { return OpDecl; }
@@ -96,52 +95,7 @@ struct X86Operand : public MCParsedAsmOperand {
   /// getOffsetOfLoc - Get the location of the offset operator.
   SMLoc getOffsetOfLoc() const override { return OffsetOfLoc; }
 
-  void print(raw_ostream &OS) const override {
-
-    auto PrintImmValue = [&](const MCExpr *Val, const char *VName) {
-      if (Val->getKind() == MCExpr::Constant) {
-        if (auto Imm = cast<MCConstantExpr>(Val)->getValue())
-          OS << VName << Imm;
-      } else if (Val->getKind() == MCExpr::SymbolRef) {
-        if (auto *SRE = dyn_cast<MCSymbolRefExpr>(Val)) {
-          const MCSymbol &Sym = SRE->getSymbol();
-          if (auto SymName = Sym.getName().data())
-            OS << VName << SymName;
-        }
-      }
-    };
-
-    switch (Kind) {
-    case Token:
-      OS << Tok.Data;
-      break;
-    case Register:
-      OS << "Reg:" << X86IntelInstPrinter::getRegisterName(Reg.RegNo);
-      break;
-    case Immediate:
-      PrintImmValue(Imm.Val, "Imm:");
-      break;
-    case Prefix:
-      OS << "Prefix:" << Pref.Prefixes;
-      break;
-    case Memory:
-      OS << "Memory: ModeSize=" << Mem.ModeSize;
-      if (Mem.Size)
-        OS << ",Size=" << Mem.Size;
-      if (Mem.BaseReg)
-        OS << ",BaseReg=" << X86IntelInstPrinter::getRegisterName(Mem.BaseReg);
-      if (Mem.IndexReg)
-        OS << ",IndexReg="
-           << X86IntelInstPrinter::getRegisterName(Mem.IndexReg);
-      if (Mem.Scale)
-        OS << ",Scale=" << Mem.Scale;
-      if (Mem.Disp)
-        PrintImmValue(Mem.Disp, ",Disp=");
-      if (Mem.SegReg)
-        OS << ",SegReg=" << X86IntelInstPrinter::getRegisterName(Mem.SegReg);
-      break;
-    }
-  }
+  void print(raw_ostream &OS) const override {}
 
   StringRef getToken() const {
     assert(Kind == Token && "Invalid access!");

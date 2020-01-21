@@ -55,7 +55,6 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
@@ -566,23 +565,9 @@ void Verifier::visitGlobalValue(const GlobalValue &GV) {
   if (GV.isDeclarationForLinker())
     Assert(!GV.hasComdat(), "Declaration may not be in a Comdat!", &GV);
 
-  if (GV.hasDLLImportStorageClass()) {
+  if (GV.hasDLLImportStorageClass())
     Assert(!GV.isDSOLocal(),
            "GlobalValue with DLLImport Storage is dso_local!", &GV);
-
-    Assert((GV.isDeclaration() && GV.hasExternalLinkage()) ||
-               GV.hasAvailableExternallyLinkage(),
-           "Global is marked as dllimport, but not external", &GV);
-  }
-
-  if (GV.hasLocalLinkage())
-    Assert(GV.isDSOLocal(),
-           "GlobalValue with private or internal linkage must be dso_local!",
-           &GV);
-
-  if (!GV.hasDefaultVisibility() && !GV.hasExternalWeakLinkage())
-    Assert(GV.isDSOLocal(),
-           "GlobalValue with non default visibility must be dso_local!", &GV);
 
   forEachUser(&GV, GlobalValueVisited, [&](const Value *V) -> bool {
     if (const Instruction *I = dyn_cast<Instruction>(V)) {
@@ -669,6 +654,11 @@ void Verifier::visitGlobalVariable(const GlobalVariable &GV) {
       }
     }
   }
+
+  Assert(!GV.hasDLLImportStorageClass() ||
+             (GV.isDeclaration() && GV.hasExternalLinkage()) ||
+             GV.hasAvailableExternallyLinkage(),
+         "Global is marked as dllimport, but not external", &GV);
 
   // Visit any debug info attachments.
   SmallVector<MDNode *, 1> MDs;
@@ -868,12 +858,7 @@ void Verifier::visitDIScope(const DIScope &N) {
 
 void Verifier::visitDISubrange(const DISubrange &N) {
   AssertDI(N.getTag() == dwarf::DW_TAG_subrange_type, "invalid tag", &N);
-  auto Count = N.getCount();
-  AssertDI(Count, "Count must either be a signed constant or a DIVariable",
-           &N);
-  AssertDI(!Count.is<ConstantInt*>() ||
-               Count.get<ConstantInt*>()->getSExtValue() >= -1,
-           "invalid subrange count", &N);
+  AssertDI(N.getCount() >= -1, "invalid subrange count", &N);
 }
 
 void Verifier::visitDIEnumerator(const DIEnumerator &N) {
@@ -920,12 +905,9 @@ void Verifier::visitDIDerivedType(const DIDerivedType &N) {
   }
 }
 
-/// Detect mutually exclusive flags.
 static bool hasConflictingReferenceFlags(unsigned Flags) {
-  return ((Flags & DINode::FlagLValueReference) &&
-          (Flags & DINode::FlagRValueReference)) ||
-         ((Flags & DINode::FlagTypePassByValue) &&
-          (Flags & DINode::FlagTypePassByReference));
+  return (Flags & DINode::FlagLValueReference) &&
+         (Flags & DINode::FlagRValueReference);
 }
 
 void Verifier::visitTemplateParams(const MDNode &N, const Metadata &RawParams) {
@@ -945,8 +927,7 @@ void Verifier::visitDICompositeType(const DICompositeType &N) {
                N.getTag() == dwarf::DW_TAG_structure_type ||
                N.getTag() == dwarf::DW_TAG_union_type ||
                N.getTag() == dwarf::DW_TAG_enumeration_type ||
-               N.getTag() == dwarf::DW_TAG_class_type ||
-               N.getTag() == dwarf::DW_TAG_variant_part,
+               N.getTag() == dwarf::DW_TAG_class_type,
            "invalid tag", &N);
 
   AssertDI(isScope(N.getRawScope()), "invalid scope", &N, N.getRawScope());
@@ -959,14 +940,6 @@ void Verifier::visitDICompositeType(const DICompositeType &N) {
            N.getRawVTableHolder());
   AssertDI(!hasConflictingReferenceFlags(N.getFlags()),
            "invalid reference flags", &N);
-
-  if (N.isVector()) {
-    const DINodeArray Elements = N.getElements();
-    AssertDI(Elements.size() == 1 &&
-             Elements[0]->getTag() == dwarf::DW_TAG_subrange_type,
-             "invalid vector, expected one element of type subrange", &N);
-  }
-
   if (auto *Params = N.getRawTemplateParams())
     visitTemplateParams(N, *Params);
 
@@ -974,11 +947,6 @@ void Verifier::visitDICompositeType(const DICompositeType &N) {
       N.getTag() == dwarf::DW_TAG_union_type) {
     AssertDI(N.getFile() && !N.getFile()->getFilename().empty(),
              "class/union requires a filename", &N, N.getFile());
-  }
-
-  if (auto *D = N.getRawDiscriminator()) {
-    AssertDI(isa<DIDerivedType>(D) && N.getTag() == dwarf::DW_TAG_variant_part,
-             "discriminator can only appear on variant part");
   }
 }
 
@@ -996,23 +964,8 @@ void Verifier::visitDISubroutineType(const DISubroutineType &N) {
 
 void Verifier::visitDIFile(const DIFile &N) {
   AssertDI(N.getTag() == dwarf::DW_TAG_file_type, "invalid tag", &N);
-  Optional<DIFile::ChecksumInfo<StringRef>> Checksum = N.getChecksum();
-  if (Checksum) {
-    AssertDI(Checksum->Kind <= DIFile::ChecksumKind::CSK_Last,
-             "invalid checksum kind", &N);
-    size_t Size;
-    switch (Checksum->Kind) {
-    case DIFile::CSK_MD5:
-      Size = 32;
-      break;
-    case DIFile::CSK_SHA1:
-      Size = 40;
-      break;
-    }
-    AssertDI(Checksum->Value.size() == Size, "invalid checksum length", &N);
-    AssertDI(Checksum->Value.find_if_not(llvm::isHexDigit) == StringRef::npos,
-             "invalid checksum", &N);
-  }
+  AssertDI((N.getChecksumKind() != DIFile::CSK_None ||
+            N.getChecksum().empty()), "invalid checksum kind", &N);
 }
 
 void Verifier::visitDICompileUnit(const DICompileUnit &N) {
@@ -1404,7 +1357,6 @@ Verifier::visitModuleFlag(const MDNode *Op,
 static bool isFuncOnlyAttr(Attribute::AttrKind Kind) {
   switch (Kind) {
   case Attribute::NoReturn:
-  case Attribute::NoCfCheck:
   case Attribute::NoUnwind:
   case Attribute::NoInline:
   case Attribute::AlwaysInline:
@@ -1413,7 +1365,6 @@ static bool isFuncOnlyAttr(Attribute::AttrKind Kind) {
   case Attribute::StackProtectReq:
   case Attribute::StackProtectStrong:
   case Attribute::SafeStack:
-  case Attribute::ShadowCallStack:
   case Attribute::NoRedZone:
   case Attribute::NoImplicitFloat:
   case Attribute::Naked:
@@ -1431,7 +1382,6 @@ static bool isFuncOnlyAttr(Attribute::AttrKind Kind) {
   case Attribute::Builtin:
   case Attribute::NoBuiltin:
   case Attribute::Cold:
-  case Attribute::OptForFuzzing:
   case Attribute::OptimizeNone:
   case Attribute::JumpTable:
   case Attribute::Convergent:
@@ -1742,11 +1692,8 @@ void Verifier::verifyFunctionMetadata(
              "expected string with name of the !prof annotation", MD);
       MDString *MDS = cast<MDString>(MD->getOperand(0));
       StringRef ProfName = MDS->getString();
-      Assert(ProfName.equals("function_entry_count") ||
-                 ProfName.equals("synthetic_function_entry_count"),
-             "first operand should be 'function_entry_count'"
-             " or 'synthetic_function_entry_count'",
-             MD);
+      Assert(ProfName.equals("function_entry_count"),
+             "first operand should be 'function_entry_count'", MD);
 
       // Check second operand.
       Assert(MD->getOperand(1) != nullptr, "second operand should not be null",
@@ -2204,6 +2151,11 @@ void Verifier::visitFunction(const Function &F) {
       Assert(false, "Invalid user of intrinsic instruction!", U);
   }
 
+  Assert(!F.hasDLLImportStorageClass() ||
+             (F.isDeclaration() && F.hasExternalLinkage()) ||
+             F.hasAvailableExternallyLinkage(),
+         "Function is marked as dllimport, but not external.", &F);
+
   auto *N = F.getSubprogram();
   HasDebugInfo = (N != nullptr);
   if (!HasDebugInfo)
@@ -2257,7 +2209,7 @@ void Verifier::visitBasicBlock(BasicBlock &BB) {
   if (isa<PHINode>(BB.front())) {
     SmallVector<BasicBlock*, 8> Preds(pred_begin(&BB), pred_end(&BB));
     SmallVector<std::pair<BasicBlock*, Value*>, 8> Values;
-    llvm::sort(Preds.begin(), Preds.end());
+    std::sort(Preds.begin(), Preds.end());
     for (const PHINode &PN : BB.phis()) {
       // Ensure that PHI nodes have at least one entry!
       Assert(PN.getNumIncomingValues() != 0,
@@ -2275,7 +2227,7 @@ void Verifier::visitBasicBlock(BasicBlock &BB) {
       for (unsigned i = 0, e = PN.getNumIncomingValues(); i != e; ++i)
         Values.push_back(
             std::make_pair(PN.getIncomingBlock(i), PN.getIncomingValue(i)));
-      llvm::sort(Values.begin(), Values.end());
+      std::sort(Values.begin(), Values.end());
 
       for (unsigned i = 0, e = Values.size(); i != e; ++i) {
         // Check to make sure that if there is more than one entry for a
@@ -2867,20 +2819,17 @@ void Verifier::verifyMustTailCall(CallInst &CI) {
   Function *F = CI.getParent()->getParent();
   FunctionType *CallerTy = F->getFunctionType();
   FunctionType *CalleeTy = CI.getFunctionType();
-  if (!CI.getCalledFunction() || !CI.getCalledFunction()->isIntrinsic()) {
-    Assert(CallerTy->getNumParams() == CalleeTy->getNumParams(),
-           "cannot guarantee tail call due to mismatched parameter counts",
-           &CI);
-    for (int I = 0, E = CallerTy->getNumParams(); I != E; ++I) {
-      Assert(
-          isTypeCongruent(CallerTy->getParamType(I), CalleeTy->getParamType(I)),
-          "cannot guarantee tail call due to mismatched parameter types", &CI);
-    }
-  }
+  Assert(CallerTy->getNumParams() == CalleeTy->getNumParams(),
+         "cannot guarantee tail call due to mismatched parameter counts", &CI);
   Assert(CallerTy->isVarArg() == CalleeTy->isVarArg(),
          "cannot guarantee tail call due to mismatched varargs", &CI);
   Assert(isTypeCongruent(CallerTy->getReturnType(), CalleeTy->getReturnType()),
          "cannot guarantee tail call due to mismatched return types", &CI);
+  for (int I = 0, E = CallerTy->getNumParams(); I != E; ++I) {
+    Assert(
+        isTypeCongruent(CallerTy->getParamType(I), CalleeTy->getParamType(I)),
+        "cannot guarantee tail call due to mismatched parameter types", &CI);
+  }
 
   // - The calling conventions of the caller and callee must match.
   Assert(F->getCallingConv() == CI.getCallingConv(),
@@ -2916,7 +2865,7 @@ void Verifier::verifyMustTailCall(CallInst &CI) {
 
   // Check the return.
   ReturnInst *Ret = dyn_cast_or_null<ReturnInst>(Next);
-  Assert(Ret, "musttail call must precede a ret with an optional bitcast",
+  Assert(Ret, "musttail call must be precede a ret with an optional bitcast",
          &CI);
   Assert(!Ret->getReturnValue() || Ret->getReturnValue() == RetVal,
          "musttail call result must be returned", Ret);
@@ -4068,30 +4017,23 @@ void Verifier::visitIntrinsicCallSite(Intrinsic::ID ID, CallSite CS) {
   case Intrinsic::memcpy:
   case Intrinsic::memmove:
   case Intrinsic::memset: {
-    const auto *MI = cast<MemIntrinsic>(CS.getInstruction());
-    auto IsValidAlignment = [&](unsigned Alignment) -> bool {
-      return Alignment == 0 || isPowerOf2_32(Alignment);
-    };
-    Assert(IsValidAlignment(MI->getDestAlignment()),
-           "alignment of arg 0 of memory intrinsic must be 0 or a power of 2",
+    ConstantInt *AlignCI = dyn_cast<ConstantInt>(CS.getArgOperand(3));
+    Assert(AlignCI,
+           "alignment argument of memory intrinsics must be a constant int",
            CS);
-    if (const auto *MTI = dyn_cast<MemTransferInst>(MI)) {
-      Assert(IsValidAlignment(MTI->getSourceAlignment()),
-             "alignment of arg 1 of memory intrinsic must be 0 or a power of 2",
-             CS);
-    }
-    Assert(isa<ConstantInt>(CS.getArgOperand(3)),
+    const APInt &AlignVal = AlignCI->getValue();
+    Assert(AlignCI->isZero() || AlignVal.isPowerOf2(),
+           "alignment argument of memory intrinsics must be a power of 2", CS);
+    Assert(isa<ConstantInt>(CS.getArgOperand(4)),
            "isvolatile argument of memory intrinsics must be a constant int",
            CS);
     break;
   }
-  case Intrinsic::memcpy_element_unordered_atomic:
-  case Intrinsic::memmove_element_unordered_atomic:
-  case Intrinsic::memset_element_unordered_atomic: {
-    const auto *AMI = cast<AtomicMemIntrinsic>(CS.getInstruction());
+  case Intrinsic::memcpy_element_unordered_atomic: {
+    const AtomicMemCpyInst *MI = cast<AtomicMemCpyInst>(CS.getInstruction());
 
     ConstantInt *ElementSizeCI =
-        dyn_cast<ConstantInt>(AMI->getRawElementSizeInBytes());
+        dyn_cast<ConstantInt>(MI->getRawElementSizeInBytes());
     Assert(ElementSizeCI,
            "element size of the element-wise unordered atomic memory "
            "intrinsic must be a constant int",
@@ -4102,9 +4044,9 @@ void Verifier::visitIntrinsicCallSite(Intrinsic::ID ID, CallSite CS) {
            "must be a power of 2",
            CS);
 
-    if (auto *LengthCI = dyn_cast<ConstantInt>(AMI->getLength())) {
+    if (auto *LengthCI = dyn_cast<ConstantInt>(MI->getLength())) {
       uint64_t Length = LengthCI->getZExtValue();
-      uint64_t ElementSize = AMI->getElementSizeInBytes();
+      uint64_t ElementSize = MI->getElementSizeInBytes();
       Assert((Length % ElementSize) == 0,
              "constant length must be a multiple of the element size in the "
              "element-wise atomic memory intrinsic",
@@ -4114,14 +4056,79 @@ void Verifier::visitIntrinsicCallSite(Intrinsic::ID ID, CallSite CS) {
     auto IsValidAlignment = [&](uint64_t Alignment) {
       return isPowerOf2_64(Alignment) && ElementSizeVal.ule(Alignment);
     };
-    uint64_t DstAlignment = AMI->getDestAlignment();
+    uint64_t DstAlignment = CS.getParamAlignment(0),
+             SrcAlignment = CS.getParamAlignment(1);
     Assert(IsValidAlignment(DstAlignment),
            "incorrect alignment of the destination argument", CS);
-    if (const auto *AMT = dyn_cast<AtomicMemTransferInst>(AMI)) {
-      uint64_t SrcAlignment = AMT->getSourceAlignment();
-      Assert(IsValidAlignment(SrcAlignment),
-             "incorrect alignment of the source argument", CS);
+    Assert(IsValidAlignment(SrcAlignment),
+           "incorrect alignment of the source argument", CS);
+    break;
+  }
+  case Intrinsic::memmove_element_unordered_atomic: {
+    auto *MI = cast<AtomicMemMoveInst>(CS.getInstruction());
+
+    ConstantInt *ElementSizeCI =
+        dyn_cast<ConstantInt>(MI->getRawElementSizeInBytes());
+    Assert(ElementSizeCI,
+           "element size of the element-wise unordered atomic memory "
+           "intrinsic must be a constant int",
+           CS);
+    const APInt &ElementSizeVal = ElementSizeCI->getValue();
+    Assert(ElementSizeVal.isPowerOf2(),
+           "element size of the element-wise atomic memory intrinsic "
+           "must be a power of 2",
+           CS);
+
+    if (auto *LengthCI = dyn_cast<ConstantInt>(MI->getLength())) {
+      uint64_t Length = LengthCI->getZExtValue();
+      uint64_t ElementSize = MI->getElementSizeInBytes();
+      Assert((Length % ElementSize) == 0,
+             "constant length must be a multiple of the element size in the "
+             "element-wise atomic memory intrinsic",
+             CS);
     }
+
+    auto IsValidAlignment = [&](uint64_t Alignment) {
+      return isPowerOf2_64(Alignment) && ElementSizeVal.ule(Alignment);
+    };
+    uint64_t DstAlignment = CS.getParamAlignment(0),
+             SrcAlignment = CS.getParamAlignment(1);
+    Assert(IsValidAlignment(DstAlignment),
+           "incorrect alignment of the destination argument", CS);
+    Assert(IsValidAlignment(SrcAlignment),
+           "incorrect alignment of the source argument", CS);
+    break;
+  }
+  case Intrinsic::memset_element_unordered_atomic: {
+    auto *MI = cast<AtomicMemSetInst>(CS.getInstruction());
+
+    ConstantInt *ElementSizeCI =
+        dyn_cast<ConstantInt>(MI->getRawElementSizeInBytes());
+    Assert(ElementSizeCI,
+           "element size of the element-wise unordered atomic memory "
+           "intrinsic must be a constant int",
+           CS);
+    const APInt &ElementSizeVal = ElementSizeCI->getValue();
+    Assert(ElementSizeVal.isPowerOf2(),
+           "element size of the element-wise atomic memory intrinsic "
+           "must be a power of 2",
+           CS);
+
+    if (auto *LengthCI = dyn_cast<ConstantInt>(MI->getLength())) {
+      uint64_t Length = LengthCI->getZExtValue();
+      uint64_t ElementSize = MI->getElementSizeInBytes();
+      Assert((Length % ElementSize) == 0,
+             "constant length must be a multiple of the element size in the "
+             "element-wise atomic memory intrinsic",
+             CS);
+    }
+
+    auto IsValidAlignment = [&](uint64_t Alignment) {
+      return isPowerOf2_64(Alignment) && ElementSizeVal.ule(Alignment);
+    };
+    uint64_t DstAlignment = CS.getParamAlignment(0);
+    Assert(IsValidAlignment(DstAlignment),
+           "incorrect alignment of the destination argument", CS);
     break;
   }
   case Intrinsic::gcroot:
@@ -4478,8 +4485,8 @@ void Verifier::visitDbgIntrinsic(StringRef Kind, DbgInfoIntrinsic &DII) {
   // The scopes for variables and !dbg attachments must agree.
   DILocalVariable *Var = DII.getVariable();
   DILocation *Loc = DII.getDebugLoc();
-  AssertDI(Loc, "llvm.dbg." + Kind + " intrinsic requires a !dbg attachment",
-           &DII, BB, F);
+  Assert(Loc, "llvm.dbg." + Kind + " intrinsic requires a !dbg attachment",
+         &DII, BB, F);
 
   DISubprogram *VarSP = getSubprogram(Var->getRawScope());
   DISubprogram *LocSP = getSubprogram(Loc->getRawScope());

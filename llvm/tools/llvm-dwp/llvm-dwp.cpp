@@ -183,7 +183,7 @@ static Expected<CompileUnitIdentifiers> getCUIdentifiers(StringRef Abbrev,
       break;
     default:
       DWARFFormValue::skipValue(Form, InfoData, &Offset,
-                                dwarf::FormParams({Version, AddrSize, Format}));
+                                DWARFFormParams({Version, AddrSize, Format}));
     }
   }
   return ID;

@@ -117,7 +117,8 @@ WebAssemblyTargetLowering::WebAssemblyTargetLowering(
   // As a special case, these operators use the type to mean the type to
   // sign-extend from.
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Expand);
-  if (!Subtarget->hasSignExt()) {
+  if (!Subtarget->hasAtomics()) {
+    // The Atomics feature includes signext intructions.
     for (auto T : {MVT::i8, MVT::i16, MVT::i32})
       setOperationAction(ISD::SIGN_EXTEND_INREG, T, Expand);
   }

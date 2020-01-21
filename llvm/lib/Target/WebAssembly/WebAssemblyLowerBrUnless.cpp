@@ -47,9 +47,6 @@ public:
 } // end anonymous namespace
 
 char WebAssemblyLowerBrUnless::ID = 0;
-INITIALIZE_PASS(WebAssemblyLowerBrUnless, DEBUG_TYPE,
-                "Lowers br_unless into inverted br_if", false, false)
-
 FunctionPass *llvm::createWebAssemblyLowerBrUnless() {
   return new WebAssemblyLowerBrUnless();
 }

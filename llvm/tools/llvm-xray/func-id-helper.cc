@@ -19,10 +19,6 @@ using namespace llvm;
 using namespace xray;
 
 std::string FuncIdConversionHelper::SymbolOrNumber(int32_t FuncId) const {
-  auto CacheIt = CachedNames.find(FuncId);
-  if (CacheIt != CachedNames.end())
-    return CacheIt->second;
-
   std::ostringstream F;
   auto It = FunctionAddresses.find(FuncId);
   if (It == FunctionAddresses.end()) {
@@ -41,9 +37,7 @@ std::string FuncIdConversionHelper::SymbolOrNumber(int32_t FuncId) const {
       F << "@(" << std::hex << It->second << ")";
     });
 
-  auto S = F.str();
-  CachedNames[FuncId] = S;
-  return S;
+  return F.str();
 }
 
 std::string FuncIdConversionHelper::FileLineAndColumn(int32_t FuncId) const {

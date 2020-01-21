@@ -53,7 +53,6 @@
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/Analysis/CFG.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineBlockFrequencyInfo.h"
 #include "llvm/CodeGen/MachineDominators.h"
@@ -219,11 +218,6 @@ public:
     MachineFunctionPass::getAnalysisUsage(AU);
   }
 
-  MachineFunctionProperties getRequiredProperties() const override {
-    return MachineFunctionProperties().set(
-      MachineFunctionProperties::Property::NoVRegs);
-  }
-
   StringRef getPassName() const override { return "Shrink Wrapping analysis"; }
 
   /// \brief Perform the shrink-wrapping analysis and update
@@ -246,6 +240,10 @@ INITIALIZE_PASS_END(ShrinkWrap, DEBUG_TYPE, "Shrink Wrap Pass", false, false)
 
 bool ShrinkWrap::useOrDefCSROrFI(const MachineInstr &MI,
                                  RegScavenger *RS) const {
+  // Ignore DBG_VALUE and other meta instructions that must not affect codegen.
+  if (MI.isMetaInstruction())
+    return false;
+
   if (MI.getOpcode() == FrameSetupOpcode ||
       MI.getOpcode() == FrameDestroyOpcode) {
     DEBUG(dbgs() << "Frame instruction: " << MI << '\n');
@@ -254,9 +252,6 @@ bool ShrinkWrap::useOrDefCSROrFI(const MachineInstr &MI,
   for (const MachineOperand &MO : MI.operands()) {
     bool UseOrDefCSR = false;
     if (MO.isReg()) {
-      // Ignore instructions like DBG_VALUE which don't read/def the register.
-      if (!MO.isDef() && !MO.readsReg())
-        continue;
       unsigned PhysReg = MO.getReg();
       if (!PhysReg)
         continue;
@@ -272,8 +267,7 @@ bool ShrinkWrap::useOrDefCSROrFI(const MachineInstr &MI,
         }
       }
     }
-    // Skip FrameIndex operands in DBG_VALUE instructions.
-    if (UseOrDefCSR || (MO.isFI() && !MI.isDebugValue())) {
+    if (UseOrDefCSR || MO.isFI()) {
       DEBUG(dbgs() << "Use or define CSR(" << UseOrDefCSR << ") or FI("
                    << MO.isFI() << "): " << MI << '\n');
       return true;
@@ -419,6 +413,41 @@ void ShrinkWrap::updateSaveRestorePoints(MachineBasicBlock &MBB,
   }
 }
 
+/// Check whether the edge (\p SrcBB, \p DestBB) is a backedge according to MLI.
+/// I.e., check if it exists a loop that contains SrcBB and where DestBB is the
+/// loop header.
+static bool isProperBackedge(const MachineLoopInfo &MLI,
+                             const MachineBasicBlock *SrcBB,
+                             const MachineBasicBlock *DestBB) {
+  for (const MachineLoop *Loop = MLI.getLoopFor(SrcBB); Loop;
+       Loop = Loop->getParentLoop()) {
+    if (Loop->getHeader() == DestBB)
+      return true;
+  }
+  return false;
+}
+
+/// Check if the CFG of \p MF is irreducible.
+static bool isIrreducibleCFG(const MachineFunction &MF,
+                             const MachineLoopInfo &MLI) {
+  const MachineBasicBlock *Entry = &*MF.begin();
+  ReversePostOrderTraversal<const MachineBasicBlock *> RPOT(Entry);
+  BitVector VisitedBB(MF.getNumBlockIDs());
+  for (const MachineBasicBlock *MBB : RPOT) {
+    VisitedBB.set(MBB->getNumber());
+    for (const MachineBasicBlock *SuccBB : MBB->successors()) {
+      if (!VisitedBB.test(SuccBB->getNumber()))
+        continue;
+      // We already visited SuccBB, thus MBB->SuccBB must be a backedge.
+      // Check that the head matches what we have in the loop information.
+      // Otherwise, we have an irreducible graph.
+      if (!isProperBackedge(MLI, MBB, SuccBB))
+        return true;
+    }
+  }
+  return false;
+}
+
 bool ShrinkWrap::runOnMachineFunction(MachineFunction &MF) {
   if (skipFunction(MF.getFunction()) || MF.empty() || !isShrinkWrapEnabled(MF))
     return false;
@@ -427,8 +456,7 @@ bool ShrinkWrap::runOnMachineFunction(MachineFunction &MF) {
 
   init(MF);
 
-  ReversePostOrderTraversal<MachineBasicBlock *> RPOT(&*MF.begin());
-  if (containsIrreducibleCFG<MachineBasicBlock *>(RPOT, *MLI)) {
+  if (isIrreducibleCFG(MF, *MLI)) {
     // If MF is irreducible, a block may be in a loop without
     // MachineLoopInfo reporting it. I.e., we may use the
     // post-dominance property in loops, which lead to incorrect
@@ -450,22 +478,6 @@ bool ShrinkWrap::runOnMachineFunction(MachineFunction &MF) {
     if (MBB.isEHFuncletEntry()) {
       DEBUG(dbgs() << "EH Funclets are not supported yet.\n");
       return false;
-    }
-
-    if (MBB.isEHPad()) {
-      // Push the prologue and epilogue outside of
-      // the region that may throw by making sure
-      // that all the landing pads are at least at the
-      // boundary of the save and restore points.
-      // The problem with exceptions is that the throw
-      // is not properly modeled and in particular, a
-      // basic block can jump out from the middle.
-      updateSaveRestorePoints(MBB, RS.get());
-      if (!ArePointsInteresting()) {
-        DEBUG(dbgs() << "EHPad prevents shrink-wrapping\n");
-        return false;
-      }
-      continue;
     }
 
     for (const MachineInstr &MI : MBB) {

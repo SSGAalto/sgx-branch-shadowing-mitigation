@@ -50,7 +50,6 @@ class GlobalValue;
 class GlobalVariable;
 class MachineBasicBlock;
 class MachineConstantPoolValue;
-class MachineDominatorTree;
 class MachineFunction;
 class MachineInstr;
 class MachineJumpTableInfo;
@@ -93,16 +92,10 @@ public:
   std::unique_ptr<MCStreamer> OutStreamer;
 
   /// The current machine function.
-  MachineFunction *MF = nullptr;
+  const MachineFunction *MF = nullptr;
 
   /// This is a pointer to the current MachineModuleInfo.
   MachineModuleInfo *MMI = nullptr;
-
-  /// This is a pointer to the current MachineLoopInfo.
-  MachineDominatorTree *MDT = nullptr;
-
-  /// This is a pointer to the current MachineLoopInfo.
-  MachineLoopInfo *MLI = nullptr;
 
   /// Optimization remark emitter.
   MachineOptimizationRemarkEmitter *ORE;
@@ -137,6 +130,9 @@ private:
 
   static char ID;
 
+  /// If VerboseAsm is set, a pointer to the loop info for this function.
+  MachineLoopInfo *LI = nullptr;
+
   struct HandlerInfo {
     AsmPrinterHandler *Handler;
     const char *TimerName;
@@ -165,12 +161,6 @@ public:
   };
 
 private:
-  /// If generated on the fly this own the instance.
-  std::unique_ptr<MachineDominatorTree> OwnedMDT;
-
-  /// If generated on the fly this own the instance.
-  std::unique_ptr<MachineLoopInfo> OwnedMLI;
-
   /// Structure for generating diagnostics for inline assembly. Only initialised
   /// when necessary.
   mutable std::unique_ptr<SrcMgrDiagInfo> DiagInfo;
@@ -454,23 +444,19 @@ public:
   void printOffset(int64_t Offset, raw_ostream &OS) const;
 
   /// Emit a byte directive and value.
-  void emitInt8(int Value) const;
+  void EmitInt8(int Value) const;
 
   /// Emit a short directive and value.
-  void emitInt16(int Value) const;
+  void EmitInt16(int Value) const;
 
   /// Emit a long directive and value.
-  void emitInt32(int Value) const;
+  void EmitInt32(int Value) const;
 
   /// Emit something like ".long Hi-Lo" where the size in bytes of the directive
   /// is specified by Size and Hi/Lo specify the labels.  This implicitly uses
   /// .set if it is available.
   void EmitLabelDifference(const MCSymbol *Hi, const MCSymbol *Lo,
                            unsigned Size) const;
-
-  /// Emit something like ".uleb128 Hi-Lo".
-  void EmitLabelDifferenceAsULEB128(const MCSymbol *Hi,
-                                    const MCSymbol *Lo) const;
 
   /// Emit something like ".long Label+Offset" where the size in bytes of the
   /// directive is specified by Size and Label specifies the label.  This
@@ -485,9 +471,6 @@ public:
     EmitLabelPlusOffset(Label, 0, Size, IsSectionRelative);
   }
 
-  /// Emit something like ".long Label + Offset".
-  void EmitDwarfOffset(const MCSymbol *Label, uint64_t Offset) const;
-
   //===------------------------------------------------------------------===//
   // Dwarf Emission Helper Routines
   //===------------------------------------------------------------------===//
@@ -497,6 +480,11 @@ public:
 
   /// Emit the specified unsigned leb128 value.
   void EmitULEB128(uint64_t Value, const char *Desc = nullptr) const;
+
+  /// Emit the specified unsigned leb128 value padded to a specific number
+  /// bytes
+  void EmitPaddedULEB128(uint64_t Value, unsigned PadTo,
+                         const char *Desc = nullptr) const;
 
   /// Emit a .byte 42 directive that corresponds to an encoding.  If verbose
   /// assembly output is enabled, we output comments describing the encoding.
@@ -520,12 +508,7 @@ public:
   /// When possible, emit a DwarfStringPool section offset without any
   /// relocations, and without using the symbol.  Otherwise, defers to \a
   /// emitDwarfSymbolReference().
-  void emitDwarfStringOffset(DwarfStringPoolEntry S) const;
-
-  /// Emit the 4-byte offset of a string from the start of its section.
-  void emitDwarfStringOffset(DwarfStringPoolEntryRef S) const {
-    emitDwarfStringOffset(S.getEntry());
-  }
+  void emitDwarfStringOffset(DwarfStringPoolEntryRef S) const;
 
   /// Get the value for DW_AT_APPLE_isa. Zero if no isa encoding specified.
   virtual unsigned getISAEncoding() { return 0; }

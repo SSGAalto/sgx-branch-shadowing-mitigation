@@ -13,7 +13,6 @@
 
 #include "RISCV.h"
 #include "RISCVTargetMachine.h"
-#include "RISCVTargetObjectFile.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
@@ -60,7 +59,7 @@ RISCVTargetMachine::RISCVTargetMachine(const Target &T, const Triple &TT,
     : LLVMTargetMachine(T, computeDataLayout(TT), TT, CPU, FS, Options,
                         getEffectiveRelocModel(TT, RM),
                         getEffectiveCodeModel(CM), OL),
-      TLOF(make_unique<RISCVELFTargetObjectFile>()),
+      TLOF(make_unique<TargetLoweringObjectFileELF>()),
       Subtarget(TT, CPU, FS, *this) {
   initAsmInfo();
 }
@@ -76,7 +75,6 @@ public:
   }
 
   bool addInstSelector() override;
-  void addPreEmitPass() override;
 };
 }
 
@@ -89,5 +87,3 @@ bool RISCVPassConfig::addInstSelector() {
 
   return false;
 }
-
-void RISCVPassConfig::addPreEmitPass() { addPass(&BranchRelaxationPassID); }

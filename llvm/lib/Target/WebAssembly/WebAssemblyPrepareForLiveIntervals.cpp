@@ -55,9 +55,6 @@ private:
 } // end anonymous namespace
 
 char WebAssemblyPrepareForLiveIntervals::ID = 0;
-INITIALIZE_PASS(WebAssemblyPrepareForLiveIntervals, DEBUG_TYPE,
-                "Fix up code for LiveIntervals", false, false)
-
 FunctionPass *llvm::createWebAssemblyPrepareForLiveIntervals() {
   return new WebAssemblyPrepareForLiveIntervals();
 }

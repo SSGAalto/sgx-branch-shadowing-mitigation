@@ -38,7 +38,6 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
-#include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/Analysis/ObjCARCAliasAnalysis.h"
 #include "llvm/Analysis/ObjCARCAnalysisUtils.h"
 #include "llvm/Analysis/ObjCARCInstKind.h"
@@ -653,11 +652,6 @@ void ObjCARCOpt::OptimizeAutoreleaseRVCall(Function &F,
 
   SmallVector<const Value *, 2> Users;
   Users.push_back(Ptr);
-
-  // Add PHIs that are equivalent to Ptr to Users.
-  if (const PHINode *PN = dyn_cast<PHINode>(Ptr))
-    getEquivalentPHIs(*PN, Users);
-
   do {
     Ptr = Users.pop_back_val();
     for (const User *U : Ptr->users()) {
@@ -685,42 +679,12 @@ void ObjCARCOpt::OptimizeAutoreleaseRVCall(Function &F,
   DEBUG(dbgs() << "New: " << *AutoreleaseRV << "\n");
 }
 
-namespace {
-Instruction *
-CloneCallInstForBB(CallInst &CI, BasicBlock &BB,
-                   DenseMap<BasicBlock *, ColorVector> &BlockColors) {
-  SmallVector<OperandBundleDef, 1> OpBundles;
-  for (unsigned I = 0, E = CI.getNumOperandBundles(); I != E; ++I) {
-    auto Bundle = CI.getOperandBundleAt(I);
-    // Funclets will be reassociated in the future.
-    if (Bundle.getTagID() == LLVMContext::OB_funclet)
-      continue;
-    OpBundles.emplace_back(Bundle);
-  }
-
-  if (!BlockColors.empty()) {
-    const ColorVector &CV = BlockColors.find(&BB)->second;
-    assert(CV.size() == 1 && "non-unique color for block!");
-    Instruction *EHPad = CV.front()->getFirstNonPHI();
-    if (EHPad->isEHPad())
-      OpBundles.emplace_back("funclet", EHPad);
-  }
-
-  return CallInst::Create(&CI, OpBundles);
-}
-}
-
 /// Visit each call, one at a time, and make simplifications without doing any
 /// additional analysis.
 void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
   DEBUG(dbgs() << "\n== ObjCARCOpt::OptimizeIndividualCalls ==\n");
   // Reset all the flags in preparation for recomputing them.
   UsedInThisFunction = 0;
-
-  DenseMap<BasicBlock *, ColorVector> BlockColors;
-  if (F.hasPersonalityFn() &&
-      isFuncletEHPersonality(classifyEHPersonality(F.getPersonalityFn())))
-    BlockColors = colorEHFunclets(F);
 
   // Visit all objc_* calls in F.
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ) {
@@ -958,10 +922,9 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
             Value *Incoming =
               GetRCIdentityRoot(PN->getIncomingValue(i));
             if (!IsNullOrUndef(Incoming)) {
+              CallInst *Clone = cast<CallInst>(CInst->clone());
               Value *Op = PN->getIncomingValue(i);
               Instruction *InsertPos = &PN->getIncomingBlock(i)->back();
-              CallInst *Clone = cast<CallInst>(CloneCallInstForBB(
-                  *CInst, *InsertPos->getParent(), BlockColors));
               if (Op->getType() != ParamTy)
                 Op = new BitCastInst(Op, ParamTy, "", InsertPos);
               Clone->setArgOperand(0, Op);

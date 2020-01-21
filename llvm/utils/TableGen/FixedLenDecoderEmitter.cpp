@@ -1701,9 +1701,10 @@ void FilterChooser::emitTableEntries(DecoderTableInfo &TableInfo) const {
 static std::string findOperandDecoderMethod(TypedInit *TI) {
   std::string Decoder;
 
-  Record *Record = cast<DefInit>(TI)->getDef();
+  RecordRecTy *Type = cast<RecordRecTy>(TI->getType());
+  Record *TypeRecord = Type->getRecord();
 
-  RecordVal *DecoderString = Record->getValue("DecoderMethod");
+  RecordVal *DecoderString = TypeRecord->getValue("DecoderMethod");
   StringInit *String = DecoderString ?
     dyn_cast<StringInit>(DecoderString->getValue()) : nullptr;
   if (String) {
@@ -1712,14 +1713,14 @@ static std::string findOperandDecoderMethod(TypedInit *TI) {
       return Decoder;
   }
 
-  if (Record->isSubClassOf("RegisterOperand"))
-    Record = Record->getValueAsDef("RegClass");
+  if (TypeRecord->isSubClassOf("RegisterOperand"))
+    TypeRecord = TypeRecord->getValueAsDef("RegClass");
 
-  if (Record->isSubClassOf("RegisterClass")) {
-    Decoder = "Decode" + Record->getName().str() + "RegisterClass";
-  } else if (Record->isSubClassOf("PointerLikeRegClass")) {
+  if (TypeRecord->isSubClassOf("RegisterClass")) {
+    Decoder = "Decode" + TypeRecord->getName().str() + "RegisterClass";
+  } else if (TypeRecord->isSubClassOf("PointerLikeRegClass")) {
     Decoder = "DecodePointerLikeRegClass" +
-      utostr(Record->getValueAsInt("RegClassKind"));
+      utostr(TypeRecord->getValueAsInt("RegClassKind"));
   }
 
   return Decoder;
@@ -1877,8 +1878,10 @@ static bool populateInstruction(CodeGenTarget &Target,
           CGI.Operands[SO.first].MIOperandInfo->getNumArgs()) {
         Init *Arg = CGI.Operands[SO.first].MIOperandInfo->
                       getArg(SO.second);
-        if (DefInit *DI = cast<DefInit>(Arg))
-          TypeRecord = DI->getDef();
+        if (TypedInit *TI = cast<TypedInit>(Arg)) {
+          RecordRecTy *Type = cast<RecordRecTy>(TI->getType());
+          TypeRecord = Type->getRecord();
+        }
       }
 
       bool isReg = false;
@@ -1956,7 +1959,7 @@ static bool populateInstruction(CodeGenTarget &Target,
     // to interpret it.  As a first step, require the target to provide
     // callbacks for decoding register classes.
     std::string Decoder = findOperandDecoderMethod(TI);
-    Record *TypeRecord = cast<DefInit>(TI)->getDef();
+    Record *TypeRecord = cast<RecordRecTy>(TI->getType())->getRecord();
 
     RecordVal *HasCompleteDecoderVal =
       TypeRecord->getValue("hasCompleteDecoder");

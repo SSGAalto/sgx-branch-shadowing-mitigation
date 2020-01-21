@@ -522,8 +522,7 @@ void MachineFunction::print(raw_ostream &OS, const SlotIndexes *Indexes) const {
   MST.incorporateFunction(getFunction());
   for (const auto &BB : *this) {
     OS << '\n';
-    // If we print the whole function, print it at its most verbose level.
-    BB.print(OS, MST, Indexes, /*IsStandalone=*/true);
+    BB.print(OS, MST, Indexes);
   }
 
   OS << "\n# End machine code for function " << getName() << ".\n\n";

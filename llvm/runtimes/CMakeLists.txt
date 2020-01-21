@@ -107,13 +107,6 @@ if(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_CURRENT_SOURCE_DIR})
     endif()
   endif()
 
-  # Avoid checking whether the compiler is working.
-  set(LLVM_COMPILER_CHECKED ON)
-
-  # Handle common options used by all runtimes.
-  include(AddLLVM)
-  include(HandleLLVMOptions)
-
   set(CMAKE_REQUIRED_FLAGS ${SAFE_CMAKE_REQUIRED_FLAGS})
   set(CMAKE_REQUIRED_LIBRARIES ${SAFE_CMAKE_REQUIRED_LIBRARIES})
 
@@ -361,9 +354,6 @@ else() # if this is included from LLVM's CMake
                              CMAKE_ARGS -DCOMPILER_RT_BUILD_BUILTINS=Off
                                         -DLLVM_INCLUDE_TESTS=${LLVM_INCLUDE_TESTS}
                                         -DLLVM_LIBRARY_DIR=${LLVM_LIBRARY_DIR}
-                                        -DCMAKE_C_COMPILER_TARGET=${TARGET_TRIPLE}
-                                        -DCMAKE_CXX_COMPILER_TARGET=${TARGET_TRIPLE}
-                                        -DCMAKE_ASM_COMPILER_TARGET=${TARGET_TRIPLE}
                                         -DCMAKE_C_COMPILER_WORKS=ON
                                         -DCMAKE_CXX_COMPILER_WORKS=ON
                                         -DCMAKE_ASM_COMPILER_WORKS=ON

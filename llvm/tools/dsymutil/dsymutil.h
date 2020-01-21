@@ -37,19 +37,10 @@ struct LinkOptions {
   bool NoOutput = false;
 
   /// Do not unique types according to ODR
-  bool NoODR = false;
-
-  /// Update
-  bool Update = false;
-
-  /// Minimize
-  bool Minimize = false;
+  bool NoODR;
 
   /// Do not check swiftmodule timestamp
   bool NoTimestamp = false;
-
-  /// Number of threads.
-  unsigned Threads = 1;
 
   /// -oso-prepend-path
   std::string PrependPath;
@@ -57,25 +48,25 @@ struct LinkOptions {
   LinkOptions() = default;
 };
 
-/// Extract the DebugMaps from the given file.
+/// \brief Extract the DebugMaps from the given file.
 /// The file has to be a MachO object file. Multiple debug maps can be
 /// returned when the file is universal (aka fat) binary.
 ErrorOr<std::vector<std::unique_ptr<DebugMap>>>
 parseDebugMap(StringRef InputFile, ArrayRef<std::string> Archs,
-              StringRef PrependPath, bool PaperTrailWarnings, bool Verbose,
-              bool InputIsYAML);
+              StringRef PrependPath, bool Verbose, bool InputIsYAML);
 
-/// Dump the symbol table
+/// \brief Dump the symbol table
 bool dumpStab(StringRef InputFile, ArrayRef<std::string> Archs,
               StringRef PrependPath = "");
 
-/// Link the Dwarf debug info as directed by the passed DebugMap \p DM into a
-/// DwarfFile named \p OutputFilename. \returns false if the link failed.
+/// \brief Link the Dwarf debuginfo as directed by the passed DebugMap
+/// \p DM into a DwarfFile named \p OutputFilename.
+/// \returns false if the link failed.
 bool linkDwarf(raw_fd_ostream &OutFile, const DebugMap &DM,
                const LinkOptions &Options);
 
-void warn(Twine Warning, Twine Context = {});
-bool error(Twine Error, Twine Context = {});
+void warn(const Twine &Warning, const Twine &Context);
+bool error(const Twine &Error, const Twine &Context);
 
 } // end namespace dsymutil
 } // end namespace llvm

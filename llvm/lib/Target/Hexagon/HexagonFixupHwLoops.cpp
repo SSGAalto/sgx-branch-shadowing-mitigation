@@ -20,7 +20,6 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
-#include "llvm/Support/MathExtras.h"
 #include "llvm/PassSupport.h"
 
 using namespace llvm;
@@ -138,7 +137,7 @@ bool HexagonFixupHwLoops::fixupLoopInstrs(MachineFunction &MF) {
     MachineBasicBlock::iterator MII = MBB.begin();
     MachineBasicBlock::iterator MIE = MBB.end();
     while (MII != MIE) {
-      unsigned InstSize = HII->getSize(*MII);
+      InstOffset += HII->getSize(*MII);
       if (MII->isMetaInstruction()) {
         ++MII;
         continue;
@@ -146,10 +145,8 @@ bool HexagonFixupHwLoops::fixupLoopInstrs(MachineFunction &MF) {
       if (isHardwareLoop(*MII)) {
         assert(MII->getOperand(0).isMBB() &&
                "Expect a basic block as loop operand");
-        MachineBasicBlock *TargetBB = MII->getOperand(0).getMBB();
-        unsigned Diff = AbsoluteDifference(InstOffset,
-                                           BlockToInstOffset[TargetBB]);
-        if (Diff > MaxLoopRange) {
+        int diff = InstOffset - BlockToInstOffset[MII->getOperand(0).getMBB()];
+        if ((unsigned)abs(diff) > MaxLoopRange) {
           useExtLoopInstr(MF, MII);
           MII = MBB.erase(MII);
           Changed = true;
@@ -159,7 +156,6 @@ bool HexagonFixupHwLoops::fixupLoopInstrs(MachineFunction &MF) {
       } else {
         ++MII;
       }
-      InstOffset += InstSize;
     }
   }
 

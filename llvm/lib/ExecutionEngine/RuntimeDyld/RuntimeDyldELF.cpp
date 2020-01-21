@@ -65,7 +65,7 @@ template <class ELFT> class DyldELFObject : public ELFObjectFile<ELFT> {
 
   typedef Elf_Ehdr_Impl<ELFT> Elf_Ehdr;
 
-  typedef typename ELFT::uint addr_type;
+  typedef typename ELFDataTypeTypedefHelper<ELFT>::value_type addr_type;
 
   DyldELFObject(ELFObjectFile<ELFT> &&Obj);
 
@@ -148,8 +148,8 @@ template <typename ELFT>
 static Expected<std::unique_ptr<DyldELFObject<ELFT>>>
 createRTDyldELFObject(MemoryBufferRef Buffer, const ObjectFile &SourceObject,
                       const LoadedELFObjectInfo &L) {
-  typedef typename ELFT::Shdr Elf_Shdr;
-  typedef typename ELFT::uint addr_type;
+  typedef typename ELFFile<ELFT>::Elf_Shdr Elf_Shdr;
+  typedef typename ELFDataTypeTypedefHelper<ELFT>::value_type addr_type;
 
   Expected<std::unique_ptr<DyldELFObject<ELFT>>> ObjOrErr =
       DyldELFObject<ELFT>::create(Buffer);
@@ -326,9 +326,6 @@ void RuntimeDyldELF::resolveX86Relocation(const SectionEntry &Section,
         Value + Addend;
     break;
   }
-  // Handle R_386_PLT32 like R_386_PC32 since it should be able to
-  // reach any 32 bit address.
-  case ELF::R_386_PLT32:
   case ELF::R_386_PC32: {
     uint32_t FinalAddress =
         Section.getLoadAddressWithOffset(Offset) & 0xFFFFFFFF;
@@ -529,11 +526,10 @@ void RuntimeDyldELF::setMipsABI(const ObjectFile &Obj) {
     IsMipsN64ABI = false;
     return;
   }
-  if (auto *E = dyn_cast<ELFObjectFileBase>(&Obj)) {
-    unsigned AbiVariant = E->getPlatformFlags();
-    IsMipsO32ABI = AbiVariant & ELF::EF_MIPS_ABI_O32;
-    IsMipsN32ABI = AbiVariant & ELF::EF_MIPS_ABI2;
-  }
+  unsigned AbiVariant;
+  Obj.getPlatformFlags(AbiVariant);
+  IsMipsO32ABI = AbiVariant & ELF::EF_MIPS_ABI_O32;
+  IsMipsN32ABI = AbiVariant & ELF::EF_MIPS_ABI2;
   IsMipsN64ABI = Obj.getFileFormatName().equals("ELF64-mips");
 }
 
@@ -1262,7 +1258,8 @@ RuntimeDyldELF::processRelocationRef(
         DEBUG(dbgs() << " Create a new stub function\n");
         Stubs[Value] = Section.getStubOffset();
 
-        unsigned AbiVariant = Obj.getPlatformFlags();
+        unsigned AbiVariant;
+        O.getPlatformFlags(AbiVariant);
 
         uint8_t *StubTargetAddr = createStubFunction(
             Section.getAddressWithOffset(Section.getStubOffset()), AbiVariant);
@@ -1357,7 +1354,8 @@ RuntimeDyldELF::processRelocationRef(
         DEBUG(dbgs() << " Create a new stub function\n");
         Stubs[Value] = Section.getStubOffset();
 
-        unsigned AbiVariant = Obj.getPlatformFlags();
+        unsigned AbiVariant;
+        O.getPlatformFlags(AbiVariant);
 
         uint8_t *StubTargetAddr = createStubFunction(
             Section.getAddressWithOffset(Section.getStubOffset()), AbiVariant);
@@ -1414,7 +1412,8 @@ RuntimeDyldELF::processRelocationRef(
   } else if (Arch == Triple::ppc64 || Arch == Triple::ppc64le) {
     if (RelType == ELF::R_PPC64_REL24) {
       // Determine ABI variant in use for this object.
-      unsigned AbiVariant = Obj.getPlatformFlags();
+      unsigned AbiVariant;
+      Obj.getPlatformFlags(AbiVariant);
       AbiVariant &= ELF::EF_PPC64_ABI;
       // A PPC branch relocation will need a stub function if the target is
       // an external symbol (either Value.SymbolName is set, or SymType is
@@ -1423,8 +1422,7 @@ RuntimeDyldELF::processRelocationRef(
       SectionEntry &Section = Sections[SectionID];
       uint8_t *Target = Section.getAddressWithOffset(Offset);
       bool RangeOverflow = false;
-      bool IsExtern = Value.SymbolName || SymType == SymbolRef::ST_Unknown;
-      if (!IsExtern) {
+      if (!Value.SymbolName && SymType != SymbolRef::ST_Unknown) {
         if (AbiVariant != 2) {
           // In the ELFv1 ABI, a function call may point to the .opd entry,
           // so the final symbol value is calculated based on the relocation
@@ -1434,24 +1432,21 @@ RuntimeDyldELF::processRelocationRef(
         } else {
           // In the ELFv2 ABI, a function symbol may provide a local entry
           // point, which must be used for direct calls.
-          if (Value.SectionID == SectionID){
-            uint8_t SymOther = Symbol->getOther();
-            Value.Addend += ELF::decodePPC64LocalEntryOffset(SymOther);
-          }
+          uint8_t SymOther = Symbol->getOther();
+          Value.Addend += ELF::decodePPC64LocalEntryOffset(SymOther);
         }
         uint8_t *RelocTarget =
             Sections[Value.SectionID].getAddressWithOffset(Value.Addend);
         int64_t delta = static_cast<int64_t>(Target - RelocTarget);
         // If it is within 26-bits branch range, just set the branch target
-        if (SignExtend64<26>(delta) != delta) {
-          RangeOverflow = true;
-        } else if ((AbiVariant != 2) ||
-                   (AbiVariant == 2  && Value.SectionID == SectionID)) {
+        if (SignExtend64<26>(delta) == delta) {
           RelocationEntry RE(SectionID, Offset, RelType, Value.Addend);
           addRelocationForSection(RE, Value.SectionID);
+        } else {
+          RangeOverflow = true;
         }
       }
-      if (IsExtern || (AbiVariant == 2 && Value.SectionID != SectionID) ||
+      if (Value.SymbolName || SymType == SymbolRef::ST_Unknown ||
           RangeOverflow) {
         // It is an external symbol (either Value.SymbolName is set, or
         // SymType is SymbolRef::ST_Unknown) or out of range.
@@ -1508,10 +1503,10 @@ RuntimeDyldELF::processRelocationRef(
                             RelType, 0);
           Section.advanceStubOffset(getMaxStubSize());
         }
-        if (IsExtern || (AbiVariant == 2 && Value.SectionID != SectionID)) {
+        if (Value.SymbolName || SymType == SymbolRef::ST_Unknown) {
           // Restore the TOC for external calls
           if (AbiVariant == 2)
-            writeInt32BE(Target + 4, 0xE8410018); // ld r2,24(r1)
+            writeInt32BE(Target + 4, 0xE8410018); // ld r2,28(r1)
           else
             writeInt32BE(Target + 4, 0xE8410028); // ld r2,40(r1)
         }

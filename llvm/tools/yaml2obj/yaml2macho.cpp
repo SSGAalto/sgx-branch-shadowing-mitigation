@@ -417,10 +417,10 @@ Error MachOWriter::writeLinkEditData(raw_ostream &OS) {
     }
   }
 
-  llvm::sort(WriteQueue.begin(), WriteQueue.end(),
-             [](const writeOperation &a, const writeOperation &b) {
-               return a.first < b.first;
-             });
+  std::sort(WriteQueue.begin(), WriteQueue.end(),
+            [](const writeOperation &a, const writeOperation &b) {
+              return a.first < b.first;
+            });
 
   for (auto writeOp : WriteQueue) {
     ZeroToOffset(OS, writeOp.first);

@@ -11,7 +11,6 @@
 #include "HexagonISelDAGToDAG.h"
 #include "HexagonISelLowering.h"
 #include "HexagonTargetMachine.h"
-#include "llvm/ADT/SetVector.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/IR/Intrinsics.h"
@@ -95,13 +94,18 @@ namespace {
 // Benes network is a forward delta network immediately followed by
 // a reverse delta network.
 
-enum class ColorKind { None, Red, Black };
 
 // Graph coloring utility used to partition nodes into two groups:
 // they will correspond to nodes routed to the upper and lower networks.
 struct Coloring {
+  enum : uint8_t {
+    None = 0,
+    Red,
+    Black
+  };
+
   using Node = int;
-  using MapType = std::map<Node, ColorKind>;
+  using MapType = std::map<Node,uint8_t>;
   static constexpr Node Ignore = Node(-1);
 
   Coloring(ArrayRef<Node> Ord) : Order(Ord) {
@@ -114,10 +118,10 @@ struct Coloring {
     return Colors;
   }
 
-  ColorKind other(ColorKind Color) {
-    if (Color == ColorKind::None)
-      return ColorKind::Red;
-    return Color == ColorKind::Red ? ColorKind::Black : ColorKind::Red;
+  uint8_t other(uint8_t Color) {
+    if (Color == None)
+      return Red;
+    return Color == Red ? Black : Red;
   }
 
   void dump() const;
@@ -135,28 +139,28 @@ private:
     return (Pos < Num/2) ? Pos + Num/2 : Pos - Num/2;
   }
 
-  ColorKind getColor(Node N) {
+  uint8_t getColor(Node N) {
     auto F = Colors.find(N);
-    return F != Colors.end() ? F->second : ColorKind::None;
+    return F != Colors.end() ? F->second : (uint8_t)None;
   }
 
-  std::pair<bool, ColorKind> getUniqueColor(const NodeSet &Nodes);
+  std::pair<bool,uint8_t> getUniqueColor(const NodeSet &Nodes);
 
   void build();
   bool color();
 };
 } // namespace
 
-std::pair<bool, ColorKind> Coloring::getUniqueColor(const NodeSet &Nodes) {
-  auto Color = ColorKind::None;
+std::pair<bool,uint8_t> Coloring::getUniqueColor(const NodeSet &Nodes) {
+  uint8_t Color = None;
   for (Node N : Nodes) {
-    ColorKind ColorN = getColor(N);
-    if (ColorN == ColorKind::None)
+    uint8_t ColorN = getColor(N);
+    if (ColorN == None)
       continue;
-    if (Color == ColorKind::None)
+    if (Color == None)
       Color = ColorN;
-    else if (Color != ColorKind::None && Color != ColorN)
-      return { false, ColorKind::None };
+    else if (Color != None && Color != ColorN)
+      return { false, None };
   }
   return { true, Color };
 }
@@ -241,12 +245,12 @@ bool Coloring::color() {
 
     // Coloring failed. Split this node.
     Node C = conj(N);
-    ColorKind ColorN = other(ColorKind::None);
-    ColorKind ColorC = other(ColorN);
+    uint8_t ColorN = other(None);
+    uint8_t ColorC = other(ColorN);
     NodeSet &Cs = Edges[C];
     NodeSet CopyNs = Ns;
     for (Node M : CopyNs) {
-      ColorKind ColorM = getColor(M);
+      uint8_t ColorM = getColor(M);
       if (ColorM == ColorC) {
         // Connect M with C, disconnect M from N.
         Cs.insert(M);
@@ -259,10 +263,10 @@ bool Coloring::color() {
     Colors[C] = ColorC;
   }
 
-  // Explicitly assign "None" to all uncolored nodes.
+  // Explicitly assign "None" all all uncolored nodes.
   for (unsigned I = 0; I != Order.size(); ++I)
     if (Colors.count(I) == 0)
-      Colors[I] = ColorKind::None;
+      Colors[I] = None;
 
   return true;
 }
@@ -292,21 +296,10 @@ void Coloring::dump() const {
   }
   dbgs() << "  }\n";
 
-  auto ColorKindToName = [](ColorKind C) {
-    switch (C) {
-    case ColorKind::None:
-      return "None";
-    case ColorKind::Red:
-      return "Red";
-    case ColorKind::Black:
-      return "Black";
-    }
-    llvm_unreachable("all ColorKinds should be handled by the switch above");
-  };
-
+  static const char *const Names[] = { "None", "Red", "Black" };
   dbgs() << "  Colors: {\n";
   for (auto C : Colors)
-    dbgs() << "    " << C.first << " -> " << ColorKindToName(C.second) << "\n";
+    dbgs() << "    " << C.first << " -> " << Names[C.second] << "\n";
   dbgs() << "  }\n}\n";
 }
 
@@ -478,21 +471,21 @@ bool ReverseDeltaNetwork::route(ElemType *P, RowType *T, unsigned Size,
   if (M.empty())
     return false;
 
-  ColorKind ColorUp = ColorKind::None;
+  uint8_t ColorUp = Coloring::None;
   for (ElemType J = 0; J != Num; ++J) {
     ElemType I = P[J];
     // I is the position in the input,
     // J is the position in the output.
     if (I == Ignore)
       continue;
-    ColorKind C = M.at(I);
-    if (C == ColorKind::None)
+    uint8_t C = M.at(I);
+    if (C == Coloring::None)
       continue;
     // During "Step", inputs cannot switch halves, so if the "up" color
     // is still unknown, make sure that it is selected in such a way that
     // "I" will stay in the same half.
     bool InpUp = I < Num/2;
-    if (ColorUp == ColorKind::None)
+    if (ColorUp == Coloring::None)
       ColorUp = InpUp ? C : G.other(C);
     if ((C == ColorUp) != InpUp) {
       // If I should go to a different half than where is it now, give up.
@@ -552,16 +545,16 @@ bool BenesNetwork::route(ElemType *P, RowType *T, unsigned Size,
   // Both assignments, i.e. Red->Up and Red->Down are valid, but they will
   // result in different controls. Let's pick the one where the first
   // control will be "Pass".
-  ColorKind ColorUp = ColorKind::None;
+  uint8_t ColorUp = Coloring::None;
   for (ElemType J = 0; J != Num; ++J) {
     ElemType I = P[J];
     if (I == Ignore)
       continue;
-    ColorKind C = M.at(I);
-    if (C == ColorKind::None)
+    uint8_t C = M.at(I);
+    if (C == Coloring::None)
       continue;
-    if (ColorUp == ColorKind::None) {
-      ColorUp = (I < Num / 2) ? ColorKind::Red : ColorKind::Black;
+    if (ColorUp == Coloring::None) {
+      ColorUp = (I < Num/2) ? Coloring::Red : Coloring::Black;
     }
     unsigned CI = (I < Num/2) ? I+Num/2 : I-Num/2;
     if (C == ColorUp) {
@@ -776,13 +769,6 @@ struct ShuffleMask {
     size_t H = Mask.size()/2;
     return ShuffleMask(Mask.take_back(H));
   }
-
-  void print(raw_ostream &OS) const {
-    OS << "MinSrc:" << MinSrc << ", MaxSrc:" << MaxSrc << " {";
-    for (int M : Mask)
-      OS << ' ' << M;
-    OS << " }";
-  }
 };
 } // namespace
 
@@ -820,7 +806,6 @@ namespace llvm {
 
     void selectShuffle(SDNode *N);
     void selectRor(SDNode *N);
-    void selectVAlign(SDNode *N);
 
   private:
     void materialize(const ResultStack &Results);
@@ -919,29 +904,18 @@ static bool isPermutation(ArrayRef<int> Mask) {
 }
 
 bool HvxSelector::selectVectorConstants(SDNode *N) {
-  // Constant vectors are generated as loads from constant pools or
-  // as VSPLATs of a constant value.
+  // Constant vectors are generated as loads from constant pools.
   // Since they are generated during the selection process, the main
   // selection algorithm is not aware of them. Select them directly
   // here.
-  SmallVector<SDNode*,4> Nodes;
-  SetVector<SDNode*> WorkQ;
+  SmallVector<SDNode*,4> Loads;
+  SmallVector<SDNode*,16> WorkQ;
 
   // The DAG can change (due to CSE) during selection, so cache all the
   // unselected nodes first to avoid traversing a mutating DAG.
 
-  auto IsNodeToSelect = [] (SDNode *N) {
-    if (N->isMachineOpcode())
-      return false;
-    unsigned Opc = N->getOpcode();
-    if (Opc == HexagonISD::VSPLAT || Opc == HexagonISD::VZERO)
-      return true;
-    if (Opc == ISD::BITCAST) {
-      // Only select bitcasts of VSPLATs.
-      if (N->getOperand(0).getOpcode() == HexagonISD::VSPLAT)
-        return true;
-    }
-    if (Opc == ISD::LOAD) {
+  auto IsLoadToSelect = [] (SDNode *N) {
+    if (!N->isMachineOpcode() && N->getOpcode() == ISD::LOAD) {
       SDValue Addr = cast<LoadSDNode>(N)->getBasePtr();
       unsigned AddrOpc = Addr.getOpcode();
       if (AddrOpc == HexagonISD::AT_PCREL || AddrOpc == HexagonISD::CP)
@@ -951,19 +925,21 @@ bool HvxSelector::selectVectorConstants(SDNode *N) {
     return false;
   };
 
-  WorkQ.insert(N);
+  WorkQ.push_back(N);
   for (unsigned i = 0; i != WorkQ.size(); ++i) {
     SDNode *W = WorkQ[i];
-    if (IsNodeToSelect(W))
-      Nodes.push_back(W);
+    if (IsLoadToSelect(W)) {
+      Loads.push_back(W);
+      continue;
+    }
     for (unsigned j = 0, f = W->getNumOperands(); j != f; ++j)
-      WorkQ.insert(W->getOperand(j).getNode());
+      WorkQ.push_back(W->getOperand(j).getNode());
   }
 
-  for (SDNode *L : Nodes)
+  for (SDNode *L : Loads)
     ISel.Select(L);
 
-  return !Nodes.empty();
+  return !Loads.empty();
 }
 
 void HvxSelector::materialize(const ResultStack &Results) {
@@ -1000,11 +976,15 @@ void HvxSelector::materialize(const ResultStack &Results) {
       MVT OpTy = Op.getValueType().getSimpleVT();
       if (Part != OpRef::Whole) {
         assert(Part == OpRef::LoHalf || Part == OpRef::HiHalf);
-        MVT HalfTy = MVT::getVectorVT(OpTy.getVectorElementType(),
-                                      OpTy.getVectorNumElements()/2);
-        unsigned Sub = (Part == OpRef::LoHalf) ? Hexagon::vsub_lo
-                                               : Hexagon::vsub_hi;
-        Op = DAG.getTargetExtractSubreg(Sub, dl, HalfTy, Op);
+        if (Op.getOpcode() == HexagonISD::VCOMBINE) {
+          Op = (Part == OpRef::HiHalf) ? Op.getOperand(0) : Op.getOperand(1);
+        } else {
+          MVT HalfTy = MVT::getVectorVT(OpTy.getVectorElementType(),
+                                        OpTy.getVectorNumElements()/2);
+          unsigned Sub = (Part == OpRef::LoHalf) ? Hexagon::vsub_lo
+                                                 : Hexagon::vsub_hi;
+          Op = DAG.getTargetExtractSubreg(Sub, dl, HalfTy, Op);
+        }
       }
       Ops.push_back(Op);
     } // for (Node : Results)
@@ -1050,36 +1030,19 @@ OpRef HvxSelector::packs(ShuffleMask SM, OpRef Va, OpRef Vb,
   int VecLen = SM.Mask.size();
   MVT Ty = getSingleVT(MVT::i8);
 
-  auto IsSubvector = [] (ShuffleMask M) {
-    assert(M.MinSrc >= 0 && M.MaxSrc >= 0);
-    for (int I = 0, E = M.Mask.size(); I != E; ++I) {
-      if (M.Mask[I] >= 0 && M.Mask[I]-I != M.MinSrc)
-        return false;
-    }
-    return true;
-  };
-
   if (SM.MaxSrc - SM.MinSrc < int(HwLen)) {
-    if (SM.MinSrc == 0 || SM.MinSrc == int(HwLen) || !IsSubvector(SM)) {
-      if (SM.MaxSrc < int(HwLen)) {
-        memcpy(NewMask.data(), SM.Mask.data(), sizeof(int)*VecLen);
-        return Va;
-      }
-      if (SM.MinSrc >= int(HwLen)) {
-        for (int I = 0; I != VecLen; ++I) {
-          int M = SM.Mask[I];
-          if (M != -1)
-            M -= HwLen;
-          NewMask[I] = M;
-        }
-        return Vb;
-      }
-    }
     if (SM.MaxSrc < int(HwLen)) {
-      Vb = Va;
-    } else if (SM.MinSrc > int(HwLen)) {
-      Va = Vb;
-      SM.MinSrc -= HwLen;
+      memcpy(NewMask.data(), SM.Mask.data(), sizeof(int)*VecLen);
+      return Va;
+    }
+    if (SM.MinSrc >= int(HwLen)) {
+      for (int I = 0; I != VecLen; ++I) {
+        int M = SM.Mask[I];
+        if (M != -1)
+          M -= HwLen;
+        NewMask[I] = M;
+      }
+      return Vb;
     }
     const SDLoc &dl(Results.InpNode);
     SDValue S = DAG.getTargetConstant(SM.MinSrc, dl, MVT::i32);
@@ -1296,8 +1259,6 @@ OpRef HvxSelector::shuffp2(ShuffleMask SM, OpRef Va, OpRef Vb,
     return shuffp1(ShuffleMask(PackedMask), P, Results);
 
   SmallVector<int,256> MaskL(VecLen), MaskR(VecLen);
-  splitMask(SM.Mask, MaskL, MaskR);
-
   OpRef L = shuffp1(ShuffleMask(MaskL), Va, Results);
   OpRef R = shuffp1(ShuffleMask(MaskR), Vb, Results);
   if (!L.isValid() || !R.isValid())
@@ -1953,6 +1914,7 @@ void HvxSelector::selectShuffle(SDNode *N) {
   // If the mask is all -1's, generate "undef".
   if (!UseLeft && !UseRight) {
     ISel.ReplaceNode(N, ISel.selectUndef(SDLoc(SN), ResTy).getNode());
+    DAG.RemoveDeadNode(N);
     return;
   }
 
@@ -1994,8 +1956,8 @@ void HvxSelector::selectRor(SDNode *N) {
   SDNode *NewN = nullptr;
 
   if (auto *CN = dyn_cast<ConstantSDNode>(RotV.getNode())) {
-    unsigned S = CN->getZExtValue() % HST.getVectorLength();
-    if (S == 0) {
+    unsigned S = CN->getZExtValue();
+    if (S % HST.getVectorLength() == 0) {
       NewN = VecV.getNode();
     } else if (isUInt<3>(S)) {
       SDValue C = DAG.getTargetConstant(S, dl, MVT::i32);
@@ -2008,15 +1970,6 @@ void HvxSelector::selectRor(SDNode *N) {
     NewN = DAG.getMachineNode(Hexagon::V6_vror, dl, Ty, {VecV, RotV});
 
   ISel.ReplaceNode(N, NewN);
-}
-
-void HvxSelector::selectVAlign(SDNode *N) {
-  SDValue Vv = N->getOperand(0);
-  SDValue Vu = N->getOperand(1);
-  SDValue Rt = N->getOperand(2);
-  SDNode *NewN = DAG.getMachineNode(Hexagon::V6_valignb, SDLoc(N),
-                                    N->getValueType(0), {Vv, Vu, Rt});
-  ISel.ReplaceNode(N, NewN);
   DAG.RemoveDeadNode(N);
 }
 
@@ -2028,15 +1981,7 @@ void HexagonDAGToDAGISel::SelectHvxRor(SDNode *N) {
   HvxSelector(*this, *CurDAG).selectRor(N);
 }
 
-void HexagonDAGToDAGISel::SelectHvxVAlign(SDNode *N) {
-  HvxSelector(*this, *CurDAG).selectVAlign(N);
-}
-
 void HexagonDAGToDAGISel::SelectV65GatherPred(SDNode *N) {
-  if (!HST->usePackets()) {
-    report_fatal_error("Support for gather requires packets, "
-                       "which are disabled");
-  }
   const SDLoc &dl(N);
   SDValue Chain = N->getOperand(0);
   SDValue Address = N->getOperand(2);
@@ -2072,14 +2017,11 @@ void HexagonDAGToDAGISel::SelectV65GatherPred(SDNode *N) {
   MemOp[0] = cast<MemIntrinsicSDNode>(N)->getMemOperand();
   cast<MachineSDNode>(Result)->setMemRefs(MemOp, MemOp + 1);
 
-  ReplaceNode(N, Result);
+  ReplaceUses(N, Result);
+  CurDAG->RemoveDeadNode(N);
 }
 
 void HexagonDAGToDAGISel::SelectV65Gather(SDNode *N) {
-  if (!HST->usePackets()) {
-    report_fatal_error("Support for gather requires packets, "
-                       "which are disabled");
-  }
   const SDLoc &dl(N);
   SDValue Chain = N->getOperand(0);
   SDValue Address = N->getOperand(2);
@@ -2114,7 +2056,8 @@ void HexagonDAGToDAGISel::SelectV65Gather(SDNode *N) {
   MemOp[0] = cast<MemIntrinsicSDNode>(N)->getMemOperand();
   cast<MachineSDNode>(Result)->setMemRefs(MemOp, MemOp + 1);
 
-  ReplaceNode(N, Result);
+  ReplaceUses(N, Result);
+  CurDAG->RemoveDeadNode(N);
 }
 
 void HexagonDAGToDAGISel::SelectHVXDualOutput(SDNode *N) {
@@ -2157,3 +2100,5 @@ void HexagonDAGToDAGISel::SelectHVXDualOutput(SDNode *N) {
   ReplaceUses(SDValue(N, 1), SDValue(Result, 1));
   CurDAG->RemoveDeadNode(N);
 }
+
+

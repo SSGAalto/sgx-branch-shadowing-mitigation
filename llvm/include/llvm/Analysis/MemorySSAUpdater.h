@@ -33,7 +33,6 @@
 #define LLVM_ANALYSIS_MEMORYSSAUPDATER_H
 
 #include "llvm/ADT/SmallPtrSet.h"
-#include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/MemorySSA.h"
 #include "llvm/IR/BasicBlock.h"
@@ -44,7 +43,6 @@
 #include "llvm/IR/Use.h"
 #include "llvm/IR/User.h"
 #include "llvm/IR/Value.h"
-#include "llvm/IR/ValueHandle.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -62,7 +60,6 @@ private:
   MemorySSA *MSSA;
   SmallVector<MemoryPhi *, 8> InsertedPHIs;
   SmallPtrSet<BasicBlock *, 8> VisitedBlocks;
-  SmallSet<AssertingVH<MemoryPhi>, 8> NonOptPhis;
 
 public:
   MemorySSAUpdater(MemorySSA *MSSA) : MSSA(MSSA) {}
@@ -144,12 +141,8 @@ private:
   void moveTo(MemoryUseOrDef *What, BasicBlock *BB, WhereType Where);
   MemoryAccess *getPreviousDef(MemoryAccess *);
   MemoryAccess *getPreviousDefInBlock(MemoryAccess *);
-  MemoryAccess *
-  getPreviousDefFromEnd(BasicBlock *,
-                        DenseMap<BasicBlock *, TrackingVH<MemoryAccess>> &);
-  MemoryAccess *
-  getPreviousDefRecursive(BasicBlock *,
-                          DenseMap<BasicBlock *, TrackingVH<MemoryAccess>> &);
+  MemoryAccess *getPreviousDefFromEnd(BasicBlock *);
+  MemoryAccess *getPreviousDefRecursive(BasicBlock *);
   MemoryAccess *recursePhi(MemoryAccess *Phi);
   template <class RangeType>
   MemoryAccess *tryRemoveTrivialPhi(MemoryPhi *Phi, RangeType &Operands);

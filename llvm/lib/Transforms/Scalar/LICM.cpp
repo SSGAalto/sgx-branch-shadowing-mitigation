@@ -47,7 +47,6 @@
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionAliasAnalysis.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
-#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
@@ -65,6 +64,7 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/LoopPassManager.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 #include "llvm/Transforms/Utils/SSAUpdater.h"
 #include <algorithm>
@@ -393,7 +393,6 @@ bool llvm::sinkRegion(DomTreeNode *N, AliasAnalysis *AA, LoopInfo *LI,
       // used in the loop, instead, just delete it.
       if (isInstructionTriviallyDead(&I, TLI)) {
         DEBUG(dbgs() << "LICM deleting dead inst: " << I << '\n');
-        salvageDebugInfo(I);
         ++II;
         CurAST->deleteValue(&I);
         I.eraseFromParent();
@@ -502,6 +501,43 @@ bool llvm::hoistRegion(DomTreeNode *N, AliasAnalysis *AA, LoopInfo *LI,
   }
 
   return Changed;
+}
+
+/// Computes loop safety information, checks loop body & header
+/// for the possibility of may throw exception.
+///
+void llvm::computeLoopSafetyInfo(LoopSafetyInfo *SafetyInfo, Loop *CurLoop) {
+  assert(CurLoop != nullptr && "CurLoop cant be null");
+  BasicBlock *Header = CurLoop->getHeader();
+  // Setting default safety values.
+  SafetyInfo->MayThrow = false;
+  SafetyInfo->HeaderMayThrow = false;
+  // Iterate over header and compute safety info.
+  for (BasicBlock::iterator I = Header->begin(), E = Header->end();
+       (I != E) && !SafetyInfo->HeaderMayThrow; ++I)
+    SafetyInfo->HeaderMayThrow |=
+        !isGuaranteedToTransferExecutionToSuccessor(&*I);
+
+  SafetyInfo->MayThrow = SafetyInfo->HeaderMayThrow;
+  // Iterate over loop instructions and compute safety info.
+  // Skip header as it has been computed and stored in HeaderMayThrow.
+  // The first block in loopinfo.Blocks is guaranteed to be the header.
+  assert(Header == *CurLoop->getBlocks().begin() &&
+         "First block must be header");
+  for (Loop::block_iterator BB = std::next(CurLoop->block_begin()),
+                            BBE = CurLoop->block_end();
+       (BB != BBE) && !SafetyInfo->MayThrow; ++BB)
+    for (BasicBlock::iterator I = (*BB)->begin(), E = (*BB)->end();
+         (I != E) && !SafetyInfo->MayThrow; ++I)
+      SafetyInfo->MayThrow |= !isGuaranteedToTransferExecutionToSuccessor(&*I);
+
+  // Compute funclet colors if we might sink/hoist in a function with a funclet
+  // personality routine.
+  Function *Fn = CurLoop->getHeader()->getParent();
+  if (Fn->hasPersonalityFn())
+    if (Constant *PersonalityFn = Fn->getPersonalityFn())
+      if (isFuncletEHPersonality(classifyEHPersonality(PersonalityFn)))
+        SafetyInfo->BlockColors = colorEHFunclets(*Fn);
 }
 
 // Return true if LI is invariant within scope of the loop. LI is invariant if
@@ -893,14 +929,8 @@ static void splitPredecessorsOfLoopExit(PHINode *PN, DominatorTree *DT,
       // Since we do not allow splitting EH-block with BlockColors in
       // canSplitPredecessors(), we can simply assign predecessor's color to
       // the new block.
-      if (!BlockColors.empty()) {
-        // Grab a reference to the ColorVector to be inserted before getting the
-        // reference to the vector we are copying because inserting the new
-        // element in BlockColors might cause the map to be reallocated.
-        ColorVector &ColorsForNewBlock = BlockColors[NewPred];
-        ColorVector &ColorsForOldBlock = BlockColors[PredBB];
-        ColorsForNewBlock = ColorsForOldBlock;
-      }
+      if (!BlockColors.empty())
+        BlockColors[NewPred] = BlockColors[PredBB];
     }
     PredBBs.remove(PredBB);
   }
@@ -1206,7 +1236,7 @@ bool llvm::promoteLoopAccessesToScalars(
   Value *SomePtr = *PointerMustAliases.begin();
   BasicBlock *Preheader = CurLoop->getLoopPreheader();
 
-  // It is not safe to promote a load/store from the loop if the load/store is
+  // It isn't safe to promote a load/store from the loop if the load/store is
   // conditional.  For example, turning:
   //
   //    for () { if (c) *P += 1; }
@@ -1335,7 +1365,7 @@ bool llvm::promoteLoopAccessesToScalars(
 
         // If a store dominates all exit blocks, it is safe to sink.
         // As explained above, if an exit block was executed, a dominating
-        // store must have been executed at least once, so we are not
+        // store must have been been executed at least once, so we are not
         // introducing stores on paths that did not have them.
         // Note that this only looks at explicit exit blocks. If we ever
         // start sinking stores into unwind edges (see above), this will break.

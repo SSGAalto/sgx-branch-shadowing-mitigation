@@ -211,8 +211,7 @@ public:
 
   /// \brief Reserve the registers that may be accesed using indirect addressing.
   void reserveIndirectRegisters(BitVector &Reserved,
-                                const MachineFunction &MF,
-                                const R600RegisterInfo &TRI) const;
+                                const MachineFunction &MF) const;
 
   /// Calculate the "Indirect Address" for the given \p RegIndex and
   /// \p Channel

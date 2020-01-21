@@ -75,9 +75,6 @@ namespace llvm {
       ///
       CALL,
 
-      /// Same as call except it adds the NoTrack prefix.
-      NT_CALL,
-
       /// This operation implements the lowering for readcyclecounter.
       RDTSC_DAG,
 
@@ -124,10 +121,6 @@ namespace llvm {
       /// condition code, and operand 3 is the flag operand produced by a CMP
       /// or TEST instruction.
       BRCOND,
-
-      /// BRIND node with NoTrack prefix. Operand 0 is the chain operand and
-      /// operand 1 is the target address.
-      NT_BRIND,
 
       /// Return with a flag operand. Operand 0 is the chain operand, operand
       /// 1 is the number of bytes of stack to pop.
@@ -311,6 +304,9 @@ namespace llvm {
       // Vector FP round.
       VFPROUND, VFPROUND_RND, VFPROUNDS_RND,
 
+      // Convert a vector to mask, set bits base on MSB.
+      CVT2MASK,
+
       // 128-bit vector logical left / right shift
       VSHLDQ, VSRLDQ,
 
@@ -336,6 +332,8 @@ namespace llvm {
 
       // Vector integer comparisons.
       PCMPEQ, PCMPGT,
+      // Vector integer comparisons, the result is in a mask vector.
+      PCMPEQM, PCMPGTM,
 
       // v8i16 Horizontal minimum and position.
       PHMINPOS,
@@ -352,9 +350,6 @@ namespace llvm {
       // Arithmetic operations with FLAGS results.
       ADD, SUB, ADC, SBB, SMUL,
       INC, DEC, OR, XOR, AND,
-
-      // Bit field extract.
-      BEXTR,
 
       // LOW, HI, FLAGS = umul LHS, RHS.
       UMUL,
@@ -378,12 +373,13 @@ namespace llvm {
       // Vector packed fp sign bitwise comparisons.
       TESTP,
 
+      // Vector "test" in AVX-512, the result is in a mask vector.
+      TESTM,
+      TESTNM,
+
       // OR/AND test for masks.
       KORTEST,
       KTEST,
-
-      // ADD for masks.
-      KADD,
 
       // Several flavors of instructions with vector shuffle behaviors.
       // Saturated signed/unnsigned packing.
@@ -833,17 +829,9 @@ namespace llvm {
     /// Vector-sized comparisons are fast using PCMPEQ + PMOVMSK or PTEST.
     MVT hasFastEqualityCompare(unsigned NumBits) const override;
 
-    /// Allow multiple load pairs per block for smaller and faster code.
-    unsigned getMemcmpEqZeroLoadsPerBlock() const override {
-      return 2;
-    }
-
     /// Return the value type to use for ISD::SETCC.
     EVT getSetCCResultType(const DataLayout &DL, LLVMContext &Context,
                            EVT VT) const override;
-
-    bool targetShrinkDemandedConstant(SDValue Op, const APInt &Demanded,
-                                      TargetLoweringOpt &TLO) const override;
 
     /// Determine which of the bits specified in Mask are known to be either
     /// zero or one and return them in the KnownZero/KnownOne bitsets.
@@ -1091,21 +1079,11 @@ namespace llvm {
     /// \brief Customize the preferred legalization strategy for certain types.
     LegalizeTypeAction getPreferredVectorAction(EVT VT) const override;
 
-    MVT getRegisterTypeForCallingConv(MVT VT) const override;
-
-    MVT getRegisterTypeForCallingConv(LLVMContext &Context,
-                                      EVT VT) const override;
-
-    unsigned getNumRegistersForCallingConv(LLVMContext &Context,
-                                           EVT VT) const override;
-
     bool isIntDivCheap(EVT VT, AttributeList Attr) const override;
 
     bool supportSwiftError() const override;
 
     StringRef getStackProbeSymbolName(MachineFunction &MF) const override;
-
-    bool hasVectorBlend() const override { return true; }
 
     unsigned getMaxSupportedInterleaveFactor() const override { return 4; }
 
@@ -1121,9 +1099,8 @@ namespace llvm {
     bool lowerInterleavedStore(StoreInst *SI, ShuffleVectorInst *SVI,
                                unsigned Factor) const override;
 
-    SDValue expandIndirectJTBranch(const SDLoc& dl, SDValue Value, 
-                                   SDValue Addr, SelectionDAG &DAG) 
-                                   const override;
+
+    void finalizeLowering(MachineFunction &MF) const override;
 
   protected:
     std::pair<const TargetRegisterClass *, uint8_t>
@@ -1199,8 +1176,7 @@ namespace llvm {
     SDValue LowerEXTRACT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINSERT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
 
-    unsigned getGlobalWrapperKind(const GlobalValue *GV = nullptr,
-                                  const unsigned char OpFlags = 0) const;
+    unsigned getGlobalWrapperKind(const GlobalValue *GV = nullptr) const;
     SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerGlobalAddress(const GlobalValue *GV, const SDLoc &dl,
@@ -1470,7 +1446,6 @@ namespace llvm {
     const SDValue &getIndex()   const { return getOperand(4); }
     const SDValue &getMask()    const { return getOperand(2); }
     const SDValue &getValue()   const { return getOperand(1); }
-    const SDValue &getScale()   const { return getOperand(5); }
 
     static bool classof(const SDNode *N) {
       return N->getOpcode() == X86ISD::MGATHER ||

@@ -20,7 +20,6 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/DemandedBits.h"
 #include "llvm/Analysis/GlobalsModRef.h"
-#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Pass.h"
@@ -115,7 +114,6 @@ static bool bitTrackingDCE(Function &F, DemandedBits &DB) {
     if (!DB.isInstructionDead(&I))
       continue;
 
-    salvageDebugInfo(I);
     Worklist.push_back(&I);
     I.dropAllReferences();
     Changed = true;

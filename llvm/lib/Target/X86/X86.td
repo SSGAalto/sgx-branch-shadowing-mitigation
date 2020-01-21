@@ -34,9 +34,6 @@ def Mode16Bit : SubtargetFeature<"16bit-mode", "In16BitMode", "true",
 def FeatureX87     : SubtargetFeature<"x87","HasX87", "true",
                                       "Enable X87 float instructions">;
 
-def FeatureNOPL    : SubtargetFeature<"nopl", "HasNOPL", "true",
-                                      "Enable NOPL instruction">;
-
 def FeatureCMOV    : SubtargetFeature<"cmov","HasCMov", "true",
                                       "Enable conditional move instructions">;
 
@@ -249,8 +246,6 @@ def FeatureCLFLUSHOPT : SubtargetFeature<"clflushopt", "HasCLFLUSHOPT", "true",
                                       "Flush A Cache Line Optimized">;
 def FeatureCLWB    : SubtargetFeature<"clwb", "HasCLWB", "true",
                                       "Cache Line Write Back">;
-def FeatureRDPID : SubtargetFeature<"rdpid", "HasRDPID", "true",
-                                    "Support RDPID instructions">;
 // On some processors, instructions that implicitly take two memory operands are
 // slow. In practice, this means that CALL, PUSH, and POP with memory operands
 // should be avoided in favor of a MOV + register CALL/PUSH/POP.
@@ -268,12 +263,6 @@ def FeatureSlowIncDec : SubtargetFeature<"slow-incdec", "SlowIncDec", "true",
 def FeatureSoftFloat
     : SubtargetFeature<"soft-float", "UseSoftFloat", "true",
                        "Use software floating point features.">;
-def FeaturePOPCNTFalseDeps : SubtargetFeature<"false-deps-popcnt",
-                                     "HasPOPCNTFalseDeps", "true",
-                                     "POPCNT has a false dependency on dest register">;
-def FeatureLZCNTFalseDeps : SubtargetFeature<"false-deps-lzcnt-tzcnt",
-                                     "HasLZCNTFalseDeps", "true",
-                                     "LZCNT/TZCNT have a false dependency on dest register">;
 // On recent X86 (port bound) processors, its preferable to combine to a single shuffle
 // using a variable mask over multiple fixed shuffles.
 def FeatureFastVariableShuffle
@@ -305,16 +294,8 @@ def FeatureFastLZCNT
     : SubtargetFeature<
           "fast-lzcnt", "HasFastLZCNT", "true",
           "LZCNT instructions are as fast as most simple integer ops">;
-// If the target can efficiently decode NOPs upto 11-bytes in length.
-def FeatureFast11ByteNOP
-    : SubtargetFeature<
-          "fast-11bytenop", "HasFast11ByteNOP", "true",
-          "Target can quickly decode up to 11 byte NOPs">;
-// If the target can efficiently decode NOPs upto 15-bytes in length.
-def FeatureFast15ByteNOP
-    : SubtargetFeature<
-          "fast-15bytenop", "HasFast15ByteNOP", "true",
-          "Target can quickly decode up to 15 byte NOPs">;
+
+
 // Sandy Bridge and newer processors can use SHLD with the same source on both
 // inputs to implement rotate to avoid the partial flag update of the normal
 // rotate instructions.
@@ -347,10 +328,6 @@ def FeatureMacroFusion
 def FeatureHasFastGather
     : SubtargetFeature<"fast-gather", "HasFastGather", "true",
                        "Indicates if gather is reasonably fast.">;
-
-def FeaturePrefer256Bit
-    : SubtargetFeature<"prefer-256-bit", "Prefer256Bit", "true",
-                       "Prefer 256-bit AVX instructions">;
 
 // Enable mitigation of some aspects of speculative execution related
 // vulnerabilities by removing speculatable indirect branches. This disables
@@ -421,10 +398,8 @@ def ProcIntelSKX  : SubtargetFeature<"skx", "X86ProcFamily",
                     "IntelSKX", "Intel Skylake Server processors">;
 def ProcIntelCNL  : SubtargetFeature<"cannonlake", "X86ProcFamily",
                     "IntelCannonlake", "Intel Cannonlake processors">;
-def ProcIntelICL  : SubtargetFeature<"icelake-client", "X86ProcFamily",
-                    "IntelIcelakeClient", "Intel Icelake processors">;
-def ProcIntelICX  : SubtargetFeature<"icelake-server", "X86ProcFamily",
-                    "IntelIcelakeServer", "Intel Icelake Server processors">;
+def ProcIntelICL  : SubtargetFeature<"icelake", "X86ProcFamily",
+                    "IntelIcelake", "Intel Icelake processors">;
 
 class Proc<string Name, list<SubtargetFeature> Features>
  : ProcessorModel<Name, GenericModel, Features>;
@@ -436,16 +411,16 @@ def : Proc<"i586",            [FeatureX87, FeatureSlowUAMem16]>;
 def : Proc<"pentium",         [FeatureX87, FeatureSlowUAMem16]>;
 def : Proc<"pentium-mmx",     [FeatureX87, FeatureSlowUAMem16, FeatureMMX]>;
 
-def : Proc<"i686", [FeatureX87, FeatureSlowUAMem16, FeatureCMOV]>;
-def : Proc<"pentiumpro", [FeatureX87, FeatureSlowUAMem16, FeatureCMOV,
-                          FeatureNOPL]>;
+foreach P = ["i686", "pentiumpro"] in {
+  def : Proc<P, [FeatureX87, FeatureSlowUAMem16, FeatureCMOV]>;
+}
 
 def : Proc<"pentium2",        [FeatureX87, FeatureSlowUAMem16, FeatureMMX,
-                               FeatureCMOV, FeatureFXSR, FeatureNOPL]>;
+                               FeatureCMOV, FeatureFXSR]>;
 
 foreach P = ["pentium3", "pentium3m"] in {
   def : Proc<P, [FeatureX87, FeatureSlowUAMem16, FeatureMMX, FeatureSSE1,
-                 FeatureFXSR, FeatureNOPL]>;
+                 FeatureFXSR]>;
 }
 
 // Enable the PostRAScheduler for SSE2 and SSE3 class cpus.
@@ -460,12 +435,12 @@ foreach P = ["pentium3", "pentium3m"] in {
 
 def : ProcessorModel<"pentium-m", GenericPostRAModel,
                      [FeatureX87, FeatureSlowUAMem16, FeatureMMX,
-                      FeatureSSE2, FeatureFXSR, FeatureNOPL]>;
+                      FeatureSSE2, FeatureFXSR]>;
 
 foreach P = ["pentium4", "pentium4m"] in {
   def : ProcessorModel<P, GenericPostRAModel,
                        [FeatureX87, FeatureSlowUAMem16, FeatureMMX,
-                        FeatureSSE2, FeatureFXSR, FeatureNOPL]>;
+                        FeatureSSE2, FeatureFXSR]>;
 }
 
 // Intel Quark.
@@ -474,19 +449,18 @@ def : Proc<"lakemont",        []>;
 // Intel Core Duo.
 def : ProcessorModel<"yonah", SandyBridgeModel,
                      [FeatureX87, FeatureSlowUAMem16, FeatureMMX, FeatureSSE3,
-                      FeatureFXSR, FeatureNOPL]>;
+                      FeatureFXSR]>;
 
 // NetBurst.
 def : ProcessorModel<"prescott", GenericPostRAModel,
                      [FeatureX87, FeatureSlowUAMem16, FeatureMMX, FeatureSSE3,
-                      FeatureFXSR, FeatureNOPL]>;
+                      FeatureFXSR]>;
 def : ProcessorModel<"nocona", GenericPostRAModel, [
   FeatureX87,
   FeatureSlowUAMem16,
   FeatureMMX,
   FeatureSSE3,
   FeatureFXSR,
-  FeatureNOPL,
   FeatureCMPXCHG16B
 ]>;
 
@@ -497,7 +471,6 @@ def : ProcessorModel<"core2", SandyBridgeModel, [
   FeatureMMX,
   FeatureSSSE3,
   FeatureFXSR,
-  FeatureNOPL,
   FeatureCMPXCHG16B,
   FeatureLAHFSAHF,
   FeatureMacroFusion
@@ -508,7 +481,6 @@ def : ProcessorModel<"penryn", SandyBridgeModel, [
   FeatureMMX,
   FeatureSSE41,
   FeatureFXSR,
-  FeatureNOPL,
   FeatureCMPXCHG16B,
   FeatureLAHFSAHF,
   FeatureMacroFusion
@@ -522,7 +494,6 @@ class BonnellProc<string Name> : ProcessorModel<Name, AtomModel, [
   FeatureMMX,
   FeatureSSSE3,
   FeatureFXSR,
-  FeatureNOPL,
   FeatureCMPXCHG16B,
   FeatureMOVBE,
   FeatureLEAForSP,
@@ -542,7 +513,6 @@ class SilvermontProc<string Name> : ProcessorModel<Name, SLMModel, [
   FeatureMMX,
   FeatureSSE42,
   FeatureFXSR,
-  FeatureNOPL,
   FeatureCMPXCHG16B,
   FeatureMOVBE,
   FeaturePOPCNT,
@@ -554,7 +524,6 @@ class SilvermontProc<string Name> : ProcessorModel<Name, SLMModel, [
   FeatureSlowLEA,
   FeatureSlowIncDec,
   FeatureSlowPMULLD,
-  FeatureRDRAND,
   FeatureLAHFSAHF
 ]>;
 def : SilvermontProc<"silvermont">;
@@ -566,7 +535,6 @@ class GoldmontProc<string Name> : ProcessorModel<Name, SLMModel, [
   FeatureMMX,
   FeatureSSE42,
   FeatureFXSR,
-  FeatureNOPL,
   FeatureCMPXCHG16B,
   FeatureMOVBE,
   FeaturePOPCNT,
@@ -596,7 +564,6 @@ class NehalemProc<string Name> : ProcessorModel<Name, SandyBridgeModel, [
   FeatureMMX,
   FeatureSSE42,
   FeatureFXSR,
-  FeatureNOPL,
   FeatureCMPXCHG16B,
   FeaturePOPCNT,
   FeatureLAHFSAHF,
@@ -612,7 +579,6 @@ class WestmereProc<string Name> : ProcessorModel<Name, SandyBridgeModel, [
   FeatureMMX,
   FeatureSSE42,
   FeatureFXSR,
-  FeatureNOPL,
   FeatureCMPXCHG16B,
   FeaturePOPCNT,
   FeatureAES,
@@ -639,7 +605,6 @@ def SNBFeatures : ProcessorFeatures<[], [
   FeatureMMX,
   FeatureAVX,
   FeatureFXSR,
-  FeatureNOPL,
   FeatureCMPXCHG16B,
   FeaturePOPCNT,
   FeatureAES,
@@ -657,8 +622,7 @@ def SNBFeatures : ProcessorFeatures<[], [
 
 class SandyBridgeProc<string Name> : ProcModel<Name, SandyBridgeModel,
                                                SNBFeatures.Value, [
-  FeatureSlowUAMem32,
-  FeaturePOPCNTFalseDeps
+  FeatureSlowUAMem32
 ]>;
 def : SandyBridgeProc<"sandybridge">;
 def : SandyBridgeProc<"corei7-avx">; // Legacy alias.
@@ -671,8 +635,7 @@ def IVBFeatures : ProcessorFeatures<SNBFeatures.Value, [
 
 class IvyBridgeProc<string Name> : ProcModel<Name, SandyBridgeModel,
                                              IVBFeatures.Value, [
-  FeatureSlowUAMem32,
-  FeaturePOPCNTFalseDeps
+  FeatureSlowUAMem32
 ]>;
 def : IvyBridgeProc<"ivybridge">;
 def : IvyBridgeProc<"core-avx-i">; // Legacy alias.
@@ -690,9 +653,7 @@ def HSWFeatures : ProcessorFeatures<IVBFeatures.Value, [
 
 class HaswellProc<string Name> : ProcModel<Name, HaswellModel,
                                            HSWFeatures.Value, [
-  ProcIntelHSW,
-  FeaturePOPCNTFalseDeps,
-  FeatureLZCNTFalseDeps
+  ProcIntelHSW
 ]>;
 def : HaswellProc<"haswell">;
 def : HaswellProc<"core-avx2">; // Legacy alias.
@@ -704,9 +665,7 @@ def BDWFeatures : ProcessorFeatures<HSWFeatures.Value, [
 ]>;
 class BroadwellProc<string Name> : ProcModel<Name, BroadwellModel,
                                              BDWFeatures.Value, [
-  ProcIntelBDW,
-  FeaturePOPCNTFalseDeps,
-  FeatureLZCNTFalseDeps
+  ProcIntelBDW
 ]>;
 def : BroadwellProc<"broadwell">;
 
@@ -715,6 +674,7 @@ def SKLFeatures : ProcessorFeatures<BDWFeatures.Value, [
   FeatureRTM,
   FeatureXSAVEC,
   FeatureXSAVES,
+  FeatureSGX,
   FeatureCLFLUSHOPT,
   FeatureFastVectorFSQRT
 ]>;
@@ -722,9 +682,7 @@ def SKLFeatures : ProcessorFeatures<BDWFeatures.Value, [
 class SkylakeClientProc<string Name> : ProcModel<Name, SkylakeClientModel,
                                                  SKLFeatures.Value, [
   ProcIntelSKL,
-  FeatureHasFastGather,
-  FeaturePOPCNTFalseDeps,
-  FeatureSGX
+  FeatureHasFastGather
 ]>;
 def : SkylakeClientProc<"skylake">;
 
@@ -777,8 +735,7 @@ def SKXFeatures : ProcessorFeatures<SKLFeatures.Value, [
 class SkylakeServerProc<string Name> : ProcModel<Name, SkylakeServerModel,
                                                  SKXFeatures.Value, [
   ProcIntelSKX,
-  FeatureHasFastGather,
-  FeaturePOPCNTFalseDeps
+  FeatureHasFastGather
 ]>;
 def : SkylakeServerProc<"skylake-avx512">;
 def : SkylakeServerProc<"skx">; // Legacy alias.
@@ -792,8 +749,7 @@ def CNLFeatures : ProcessorFeatures<SKLFeatures.Value, [
   FeaturePKU,
   FeatureVBMI,
   FeatureIFMA,
-  FeatureSHA,
-  FeatureSGX
+  FeatureSHA
 ]>;
 
 class CannonlakeProc<string Name> : ProcModel<Name, SkylakeServerModel,
@@ -811,23 +767,15 @@ def ICLFeatures : ProcessorFeatures<CNLFeatures.Value, [
   FeatureVPCLMULQDQ,
   FeatureVPOPCNTDQ,
   FeatureGFNI,
-  FeatureCLWB,
-  FeatureRDPID
+  FeatureCLWB
 ]>;
 
-class IcelakeClientProc<string Name> : ProcModel<Name, SkylakeServerModel,
-                                                 ICLFeatures.Value, [
+class IcelakeProc<string Name> : ProcModel<Name, SkylakeServerModel,
+                                           ICLFeatures.Value, [
   ProcIntelICL,
   FeatureHasFastGather
 ]>;
-def : IcelakeClientProc<"icelake-client">;
-
-class IcelakeServerProc<string Name> : ProcModel<Name, SkylakeServerModel,
-                                                 ICLFeatures.Value, [
-  ProcIntelICX,
-  FeatureHasFastGather
-]>;
-def : IcelakeServerProc<"icelake-server">;
+def : IcelakeProc<"icelake">;
 
 // AMD CPUs.
 
@@ -836,28 +784,27 @@ def : Proc<"k6-2",            [FeatureX87, FeatureSlowUAMem16, Feature3DNow]>;
 def : Proc<"k6-3",            [FeatureX87, FeatureSlowUAMem16, Feature3DNow]>;
 
 foreach P = ["athlon", "athlon-tbird"] in {
-  def : Proc<P, [FeatureX87, FeatureSlowUAMem16, Feature3DNowA,
-                 FeatureNOPL, FeatureSlowSHLD]>;
+  def : Proc<P, [FeatureX87, FeatureSlowUAMem16, Feature3DNowA, FeatureSlowSHLD]>;
 }
 
 foreach P = ["athlon-4", "athlon-xp", "athlon-mp"] in {
   def : Proc<P, [FeatureX87, FeatureSlowUAMem16, FeatureSSE1,
-                 Feature3DNowA, FeatureFXSR, FeatureNOPL, FeatureSlowSHLD]>;
+                 Feature3DNowA, FeatureFXSR, FeatureSlowSHLD]>;
 }
 
 foreach P = ["k8", "opteron", "athlon64", "athlon-fx"] in {
   def : Proc<P, [FeatureX87, FeatureSlowUAMem16, FeatureSSE2, Feature3DNowA,
-                 FeatureFXSR, FeatureNOPL, Feature64Bit, FeatureSlowSHLD]>;
+                 FeatureFXSR, Feature64Bit, FeatureSlowSHLD]>;
 }
 
 foreach P = ["k8-sse3", "opteron-sse3", "athlon64-sse3"] in {
   def : Proc<P, [FeatureX87, FeatureSlowUAMem16, FeatureSSE3, Feature3DNowA,
-                 FeatureFXSR, FeatureNOPL, FeatureCMPXCHG16B, FeatureSlowSHLD]>;
+                 FeatureFXSR, FeatureCMPXCHG16B, FeatureSlowSHLD]>;
 }
 
 foreach P = ["amdfam10", "barcelona"] in {
   def : Proc<P, [FeatureX87, FeatureSSE4A, Feature3DNowA, FeatureFXSR,
-                 FeatureNOPL, FeatureCMPXCHG16B, FeatureLZCNT, FeaturePOPCNT,
+                 FeatureCMPXCHG16B, FeatureLZCNT, FeaturePOPCNT,
                  FeatureSlowSHLD, FeatureLAHFSAHF]>;
 }
 
@@ -868,14 +815,12 @@ def : Proc<"btver1", [
   FeatureSSSE3,
   FeatureSSE4A,
   FeatureFXSR,
-  FeatureNOPL,
   FeatureCMPXCHG16B,
   FeaturePRFCHW,
   FeatureLZCNT,
   FeaturePOPCNT,
   FeatureSlowSHLD,
-  FeatureLAHFSAHF,
-  FeatureFast15ByteNOP
+  FeatureLAHFSAHF
 ]>;
 
 // Jaguar
@@ -884,7 +829,6 @@ def : ProcessorModel<"btver2", BtVer2Model, [
   FeatureMMX,
   FeatureAVX,
   FeatureFXSR,
-  FeatureNOPL,
   FeatureSSE4A,
   FeatureCMPXCHG16B,
   FeaturePRFCHW,
@@ -900,7 +844,6 @@ def : ProcessorModel<"btver2", BtVer2Model, [
   FeatureXSAVEOPT,
   FeatureSlowSHLD,
   FeatureLAHFSAHF,
-  FeatureFast15ByteNOP,
   FeatureFastPartialYMMorZMMWrite
 ]>;
 
@@ -916,7 +859,6 @@ def : Proc<"bdver1", [
   FeatureMMX,
   FeatureAVX,
   FeatureFXSR,
-  FeatureNOPL,
   FeatureSSE4A,
   FeatureLZCNT,
   FeaturePOPCNT,
@@ -924,7 +866,6 @@ def : Proc<"bdver1", [
   FeatureLWP,
   FeatureSlowSHLD,
   FeatureLAHFSAHF,
-  FeatureFast11ByteNOP,
   FeatureMacroFusion
 ]>;
 // Piledriver
@@ -939,7 +880,6 @@ def : Proc<"bdver2", [
   FeatureMMX,
   FeatureAVX,
   FeatureFXSR,
-  FeatureNOPL,
   FeatureSSE4A,
   FeatureF16C,
   FeatureLZCNT,
@@ -951,7 +891,6 @@ def : Proc<"bdver2", [
   FeatureFMA,
   FeatureSlowSHLD,
   FeatureLAHFSAHF,
-  FeatureFast11ByteNOP,
   FeatureMacroFusion
 ]>;
 
@@ -967,7 +906,6 @@ def : Proc<"bdver3", [
   FeatureMMX,
   FeatureAVX,
   FeatureFXSR,
-  FeatureNOPL,
   FeatureSSE4A,
   FeatureF16C,
   FeatureLZCNT,
@@ -981,7 +919,6 @@ def : Proc<"bdver3", [
   FeatureSlowSHLD,
   FeatureFSGSBase,
   FeatureLAHFSAHF,
-  FeatureFast11ByteNOP,
   FeatureMacroFusion
 ]>;
 
@@ -991,7 +928,6 @@ def : Proc<"bdver4", [
   FeatureMMX,
   FeatureAVX2,
   FeatureFXSR,
-  FeatureNOPL,
   FeatureXOP,
   FeatureFMA4,
   FeatureCMPXCHG16B,
@@ -1011,7 +947,6 @@ def : Proc<"bdver4", [
   FeatureSlowSHLD,
   FeatureFSGSBase,
   FeatureLAHFSAHF,
-  FeatureFast11ByteNOP,
   FeatureMWAITX,
   FeatureMacroFusion
 ]>;
@@ -1030,11 +965,9 @@ def: ProcessorModel<"znver1", Znver1Model, [
   FeatureFMA,
   FeatureFSGSBase,
   FeatureFXSR,
-  FeatureNOPL,
   FeatureFastLZCNT,
   FeatureLAHFSAHF,
   FeatureLZCNT,
-  FeatureFast15ByteNOP,
   FeatureMacroFusion,
   FeatureMMX,
   FeatureMOVBE,
@@ -1076,7 +1009,6 @@ def : ProcessorModel<"x86-64", SandyBridgeModel, [
   FeatureMMX,
   FeatureSSE2,
   FeatureFXSR,
-  FeatureNOPL,
   Feature64Bit,
   FeatureSlow3OpsLEA,
   FeatureSlowIncDec,
@@ -1140,11 +1072,4 @@ def X86 : Target {
   let InstructionSet = X86InstrInfo;
   let AssemblyParserVariants = [ATTAsmParserVariant, IntelAsmParserVariant];
   let AssemblyWriters = [ATTAsmWriter, IntelAsmWriter];
-  let AllowRegisterRenaming = 1;
 }
-
-//===----------------------------------------------------------------------===//
-// Pfm Counters
-//===----------------------------------------------------------------------===//
-
-include "X86PfmCounters.td"

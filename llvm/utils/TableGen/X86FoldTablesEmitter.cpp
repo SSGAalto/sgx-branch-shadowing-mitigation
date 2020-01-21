@@ -341,17 +341,14 @@ public:
             MemRec->getValueAsBit("hasEVEX_K") ||
         RegRec->getValueAsBit("hasEVEX_Z") !=
             MemRec->getValueAsBit("hasEVEX_Z") ||
-        // EVEX_B means different things for memory and register forms.
-        RegRec->getValueAsBit("hasEVEX_B") != 0 ||
-        MemRec->getValueAsBit("hasEVEX_B") != 0 ||
+        RegRec->getValueAsBit("hasEVEX_B") !=
+            MemRec->getValueAsBit("hasEVEX_B") ||
         RegRec->getValueAsBit("hasEVEX_RC") !=
             MemRec->getValueAsBit("hasEVEX_RC") ||
         RegRec->getValueAsBit("hasREX_WPrefix") !=
             MemRec->getValueAsBit("hasREX_WPrefix") ||
         RegRec->getValueAsBit("hasLockPrefix") !=
             MemRec->getValueAsBit("hasLockPrefix") ||
-        RegRec->getValueAsBit("hasNoTrackPrefix") !=
-            MemRec->getValueAsBit("hasNoTrackPrefix") ||
         !equalBitsInits(RegRec->getValueAsBitsInit("EVEX_LL"),
                         MemRec->getValueAsBitsInit("EVEX_LL")) ||
         !equalBitsInits(RegRec->getValueAsBitsInit("VEX_WPrefix"),
@@ -551,7 +548,7 @@ void X86FoldTablesEmitter::updateTables(const CodeGenInstruction *RegInstr,
     }
   } else if (MemInSize == RegInSize + 1 && MemOutSize + 1 == RegOutSize) {
     // Store-Folding cases.
-    // If the memory form instruction performs a store, the *output*
+    // If the memory form instruction performs performs a store, the *output*
     // register of the register form instructions disappear and instead a
     // memory *input* operand appears in the memory form instruction.
     // For example:

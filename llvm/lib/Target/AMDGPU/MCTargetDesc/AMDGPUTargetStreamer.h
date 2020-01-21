@@ -30,9 +30,6 @@ class AMDGPUTargetStreamer : public MCTargetStreamer {
 protected:
   MCContext &getContext() const { return Streamer.getContext(); }
 
-  /// \returns Equivalent EF_AMDGPU_MACH_* value for given \p GPU name.
-  unsigned getMACH(StringRef GPU) const;
-
 public:
   AMDGPUTargetStreamer(MCStreamer &S) : MCTargetStreamer(S) {}
 
@@ -93,7 +90,7 @@ class AMDGPUTargetELFStreamer final : public AMDGPUTargetStreamer {
                       function_ref<void(MCELFStreamer &)> EmitDesc);
 
 public:
-  AMDGPUTargetELFStreamer(MCStreamer &S, const MCSubtargetInfo &STI);
+  AMDGPUTargetELFStreamer(MCStreamer &S);
 
   MCELFStreamer &getStreamer();
 

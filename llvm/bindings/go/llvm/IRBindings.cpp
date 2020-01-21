@@ -84,3 +84,6 @@ LLVMDebugLocMetadata LLVMGetCurrentDebugLocation2(LLVMBuilderRef Bref) {
   return md;
 }
 
+void LLVMSetSubprogram(LLVMValueRef Func, LLVMMetadataRef SP) {
+  unwrap<Function>(Func)->setSubprogram(unwrap<DISubprogram>(SP));
+}

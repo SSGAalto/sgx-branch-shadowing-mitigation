@@ -271,7 +271,6 @@ class MCTargetAsmParser : public MCAsmParserExtension {
 public:
   enum MatchResultTy {
     Match_InvalidOperand,
-    Match_InvalidTiedOperand,
     Match_MissingFeature,
     Match_MnemonicFail,
     Match_Success,

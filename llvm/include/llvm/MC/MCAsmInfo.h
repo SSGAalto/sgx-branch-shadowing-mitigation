@@ -344,10 +344,6 @@ protected:
   /// For example, foo(plt) instead of foo@plt.  Defaults to false.
   bool UseParensForSymbolVariant = false;
 
-  /// True if the target supports flags in ".loc" directive, false if only
-  /// location is allowed.
-  bool SupportsExtendedDwarfLocDirective = true;
-
   //===--- Prologue State ----------------------------------------------===//
 
   std::vector<MCCFIInstruction> InitialFrameState;
@@ -583,9 +579,6 @@ public:
   bool doDwarfFDESymbolsUseAbsDiff() const { return DwarfFDESymbolsUseAbsDiff; }
   bool useDwarfRegNumForCFI() const { return DwarfRegNumForCFI; }
   bool useParensForSymbolVariant() const { return UseParensForSymbolVariant; }
-  bool supportsExtendedDwarfLocDirective() const {
-    return SupportsExtendedDwarfLocDirective;
-  }
 
   void addInitialFrameState(const MCCFIInstruction &Inst) {
     InitialFrameState.push_back(Inst);

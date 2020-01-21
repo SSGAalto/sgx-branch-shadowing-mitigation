@@ -102,7 +102,7 @@ function(llvm_ExternalProject_Add name source_dir)
     endforeach()
   endforeach()
 
-  if(ARG_USE_TOOLCHAIN AND NOT CMAKE_CROSSCOMPILING)
+  if(ARG_USE_TOOLCHAIN)
     if(CLANG_IN_TOOLCHAIN)
       set(compiler_args -DCMAKE_C_COMPILER=${LLVM_RUNTIME_OUTPUT_INTDIR}/clang
                         -DCMAKE_CXX_COMPILER=${LLVM_RUNTIME_OUTPUT_INTDIR}/clang++)
@@ -136,16 +136,6 @@ function(llvm_ExternalProject_Add name source_dir)
     set(sysroot_arg -DCMAKE_SYSROOT=${CMAKE_SYSROOT})
   endif()
 
-  if(CMAKE_CROSSCOMPILING)
-    set(compiler_args -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
-                      -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-                      -DCMAKE_AR=${CMAKE_AR}
-                      -DCMAKE_RANLIB=${CMAKE_RANLIB})
-    set(llvm_config_path ${LLVM_CONFIG_PATH})
-  else()
-    set(llvm_config_path "$<TARGET_FILE:llvm-config>")
-  endif()
-
   ExternalProject_Add(${name}
     DEPENDS ${ARG_DEPENDS} llvm-config
     ${name}-clobber
@@ -159,7 +149,7 @@ function(llvm_ExternalProject_Add name source_dir)
                -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
                ${sysroot_arg}
                -DLLVM_BINARY_DIR=${PROJECT_BINARY_DIR}
-               -DLLVM_CONFIG_PATH=${llvm_config_path}
+               -DLLVM_CONFIG_PATH=$<TARGET_FILE:llvm-config>
                -DLLVM_ENABLE_WERROR=${LLVM_ENABLE_WERROR}
                -DLLVM_HOST_TRIPLE=${LLVM_HOST_TRIPLE}
                -DLLVM_HAVE_LINK_VERSION_SCRIPT=${LLVM_HAVE_LINK_VERSION_SCRIPT}

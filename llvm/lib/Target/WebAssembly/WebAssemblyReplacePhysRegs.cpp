@@ -53,10 +53,6 @@ private:
 } // end anonymous namespace
 
 char WebAssemblyReplacePhysRegs::ID = 0;
-INITIALIZE_PASS(WebAssemblyReplacePhysRegs, DEBUG_TYPE,
-                "Replace physical registers with virtual registers",
-                false, false)
-
 FunctionPass *llvm::createWebAssemblyReplacePhysRegs() {
   return new WebAssemblyReplacePhysRegs();
 }

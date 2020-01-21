@@ -780,7 +780,7 @@ public:
 
     if (LDistVerify) {
       LI->verify(*DT);
-      assert(DT->verify(DominatorTree::VerificationLevel::Fast));
+      DT->verifyDomTree();
     }
 
     ++NumLoopsDistributed;

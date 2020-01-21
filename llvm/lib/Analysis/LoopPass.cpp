@@ -151,9 +151,7 @@ void LPPassManager::markLoopAsDeleted(Loop &L) {
 bool LPPassManager::runOnFunction(Function &F) {
   auto &LIWP = getAnalysis<LoopInfoWrapperPass>();
   LI = &LIWP.getLoopInfo();
-#if 0
   DominatorTree *DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
-#endif
   bool Changed = false;
 
   // Collect inherited analysis from Module level pass manager.
@@ -227,12 +225,8 @@ bool LPPassManager::runOnFunction(Function &F) {
         // is that LPPassManager might run passes which do not require LCSSA
         // form (LoopPassPrinter for example). We should skip verification for
         // such passes.
-        // FIXME: Loop-sink currently break LCSSA. Fix it and reenable the
-        // verification!
-#if 0
         if (mustPreserveAnalysisID(LCSSAVerificationPass::ID))
-          assert(CurrentLoop->isRecursivelyLCSSAForm(*DT, *LI));
-#endif
+          CurrentLoop->isRecursivelyLCSSAForm(*DT, *LI);
 
         // Then call the regular verifyAnalysis functions.
         verifyPreservedAnalysis(P);
@@ -357,7 +351,7 @@ bool LoopPass::skipLoop(const Loop *L) const {
     return false;
   // Check the opt bisect limit.
   LLVMContext &Context = F->getContext();
-  if (!Context.getOptPassGate().shouldRunPass(this, *L))
+  if (!Context.getOptBisect().shouldRunPass(this, *L))
     return true;
   // Check for the OptimizeNone attribute.
   if (F->hasFnAttribute(Attribute::OptimizeNone)) {

@@ -335,24 +335,13 @@ SIMCCodeEmitter::getSDWASrcEncoding(const MCInst &MI, unsigned OpNo,
 
   const MCOperand &MO = MI.getOperand(OpNo);
 
-  if (MO.isReg()) {
-    unsigned Reg = MO.getReg();
-    RegEnc |= MRI.getEncodingValue(Reg);
-    RegEnc &= SDWA9EncValues::SRC_VGPR_MASK;
-    if (AMDGPU::isSGPR(AMDGPU::mc2PseudoReg(Reg), &MRI)) {
-      RegEnc |= SDWA9EncValues::SRC_SGPR_MASK;
-    }
-    return RegEnc;
-  } else {
-    const MCInstrDesc &Desc = MCII.get(MI.getOpcode());
-    uint32_t Enc = getLitEncoding(MO, Desc.OpInfo[OpNo], STI);
-    if (Enc != ~0U && Enc != 255) {
-      return Enc | SDWA9EncValues::SRC_SGPR_MASK;
-    }
+  unsigned Reg = MO.getReg();
+  RegEnc |= MRI.getEncodingValue(Reg);
+  RegEnc &= SDWA9EncValues::SRC_VGPR_MASK;
+  if (AMDGPU::isSGPR(AMDGPU::mc2PseudoReg(Reg), &MRI)) {
+    RegEnc |= SDWA9EncValues::SRC_SGPR_MASK;
   }
-
-  llvm_unreachable("Unsupported operand kind");
-  return 0;
+  return RegEnc;
 }
 
 unsigned

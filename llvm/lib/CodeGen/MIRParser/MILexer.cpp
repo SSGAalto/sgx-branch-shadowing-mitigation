@@ -211,7 +211,6 @@ static MIToken::TokenKind getIdentifierKind(StringRef Identifier) {
       .Case("renamable", MIToken::kw_renamable)
       .Case("tied-def", MIToken::kw_tied_def)
       .Case("frame-setup", MIToken::kw_frame_setup)
-      .Case("frame-destroy", MIToken::kw_frame_destroy)
       .Case("debug-location", MIToken::kw_debug_location)
       .Case("same_value", MIToken::kw_cfi_same_value)
       .Case("offset", MIToken::kw_cfi_offset)
@@ -242,7 +241,6 @@ static MIToken::TokenKind getIdentifierKind(StringRef Identifier) {
       .Case("dereferenceable", MIToken::kw_dereferenceable)
       .Case("invariant", MIToken::kw_invariant)
       .Case("align", MIToken::kw_align)
-      .Case("addrspace", MIToken::kw_addrspace)
       .Case("stack", MIToken::kw_stack)
       .Case("got", MIToken::kw_got)
       .Case("jump-table", MIToken::kw_jump_table)
@@ -410,38 +408,17 @@ static bool isRegisterChar(char C) {
   return isIdentifierChar(C) && C != '.';
 }
 
-static Cursor lexNamedVirtualRegister(Cursor C, MIToken &Token) {
-  Cursor Range = C;
+static Cursor maybeLexRegister(Cursor C, MIToken &Token) {
+  if (C.peek() != '%')
+    return None;
+  if (isdigit(C.peek(1)))
+    return lexVirtualRegister(C, Token);
+  auto Range = C;
   C.advance(); // Skip '%'
   while (isRegisterChar(C.peek()))
     C.advance();
-  Token.reset(MIToken::NamedVirtualRegister, Range.upto(C))
-      .setStringValue(Range.upto(C).drop_front(1)); // Drop the '%'
-  return C;
-}
-
-static Cursor maybeLexRegister(Cursor C, MIToken &Token,
-                               ErrorCallbackType ErrorCallback) {
-  if (C.peek() != '%' && C.peek() != '$')
-    return None;
-
-  if (C.peek() == '%') {
-    if (isdigit(C.peek(1)))
-      return lexVirtualRegister(C, Token);
-
-    if (isRegisterChar(C.peek(1)))
-      return lexNamedVirtualRegister(C, Token);
-
-    return None;
-  }
-
-  assert(C.peek() == '$');
-  auto Range = C;
-  C.advance(); // Skip '$'
-  while (isRegisterChar(C.peek()))
-    C.advance();
   Token.reset(MIToken::NamedRegister, Range.upto(C))
-      .setStringValue(Range.upto(C).drop_front(1)); // Drop the '$'
+      .setStringValue(Range.upto(C).drop_front(1)); // Drop the '%'
   return C;
 }
 
@@ -464,7 +441,7 @@ static Cursor maybeLexGlobalValue(Cursor C, MIToken &Token,
 
 static Cursor maybeLexExternalSymbol(Cursor C, MIToken &Token,
                                      ErrorCallbackType ErrorCallback) {
-  if (C.peek() != '&')
+  if (C.peek() != '$')
     return None;
   return lexName(C, Token, MIToken::ExternalSymbol, /*PrefixLength=*/1,
                  ErrorCallback);
@@ -663,7 +640,7 @@ StringRef llvm::lexMIToken(StringRef Source, MIToken &Token,
     return R.remaining();
   if (Cursor R = maybeLexIRValue(C, Token, ErrorCallback))
     return R.remaining();
-  if (Cursor R = maybeLexRegister(C, Token, ErrorCallback))
+  if (Cursor R = maybeLexRegister(C, Token))
     return R.remaining();
   if (Cursor R = maybeLexGlobalValue(C, Token, ErrorCallback))
     return R.remaining();

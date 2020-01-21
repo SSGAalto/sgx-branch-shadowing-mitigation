@@ -66,11 +66,10 @@ public:
   /// Return metadata specifying that a branch or switch is unpredictable.
   MDNode *createUnpredictable();
 
-  /// Return metadata containing the entry \p Count for a function, a boolean
-  /// \Synthetic indicating whether the counts were synthetized, and the
+  /// Return metadata containing the entry \p Count for a function, and the
   /// GUIDs stored in \p Imports that need to be imported for sample PGO, to
   /// enable the same inlines as the profiled optimized binary
-  MDNode *createFunctionEntryCount(uint64_t Count, bool Synthetic,
+  MDNode *createFunctionEntryCount(uint64_t Count,
                                    const DenseSet<GlobalValue::GUID> *Imports);
 
   /// Return metadata containing the section prefix for a function.
@@ -189,10 +188,6 @@ public:
   MDNode *createTBAAAccessTag(MDNode *BaseType, MDNode *AccessType,
                               uint64_t Offset, uint64_t Size,
                               bool IsImmutable = false);
-
-  /// \brief Return mutable version of the given mutable or immutable TBAA
-  /// access tag.
-  MDNode *createMutableTBAAAccessTag(MDNode *Tag);
 
   /// \brief Return metadata containing an irreducible loop header weight.
   MDNode *createIrrLoopHeaderWeight(uint64_t Weight);

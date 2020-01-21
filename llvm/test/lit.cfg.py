@@ -138,10 +138,10 @@ tools = [
 
 # FIXME: Why do we have both `lli` and `%lli` that do slightly different things?
 tools.extend([
-    'dsymutil', 'lli', 'lli-child-target', 'llvm-ar', 'llvm-as', 'llvm-bcanalyzer',
-    'llvm-config', 'llvm-cov', 'llvm-cxxdump', 'llvm-cvtres', 'llvm-diff', 'llvm-dis',
+    'lli', 'lli-child-target', 'llvm-ar', 'llvm-as', 'llvm-bcanalyzer', 'llvm-config', 'llvm-cov',
+    'llvm-cxxdump', 'llvm-cvtres', 'llvm-diff', 'llvm-dis', 'llvm-dsymutil',
     'llvm-dwarfdump', 'llvm-extract', 'llvm-isel-fuzzer', 'llvm-opt-fuzzer', 'llvm-lib',
-    'llvm-link', 'llvm-lto', 'llvm-lto2', 'llvm-mc', 'llvm-mca',
+    'llvm-link', 'llvm-lto', 'llvm-lto2', 'llvm-mc', 'llvm-mcmarkup',
     'llvm-modextract', 'llvm-nm', 'llvm-objcopy', 'llvm-objdump',
     'llvm-pdbutil', 'llvm-profdata', 'llvm-ranlib', 'llvm-readobj',
     'llvm-rtdyld', 'llvm-size', 'llvm-split', 'llvm-strings', 'llvm-tblgen',
@@ -193,36 +193,6 @@ if loadable_module:
 # Static libraries are not built if BUILD_SHARED_LIBS is ON.
 if not config.build_shared_libs and not config.link_llvm_dylib:
     config.available_features.add('static-libs')
-
-def have_cxx_shared_library():
-    readobj_exe = lit.util.which('llvm-readobj', config.llvm_tools_dir)
-    if not readobj_exe:
-        print('llvm-readobj not found')
-        return False
-
-    try:
-        readobj_cmd = subprocess.Popen(
-            [readobj_exe, '-needed-libs', readobj_exe], stdout=subprocess.PIPE)
-    except OSError:
-        print('could not exec llvm-readobj')
-        return False
-
-    readobj_out = readobj_cmd.stdout.read().decode('ascii')
-    readobj_cmd.wait()
-
-    regex = re.compile(r'(libc\+\+|libstdc\+\+|msvcp).*\.(so|dylib|dll)')
-    needed_libs = False
-    for line in readobj_out.splitlines():
-        if 'NeededLibraries [' in line:
-            needed_libs = True
-        if ']' in line:
-            needed_libs = False
-        if needed_libs and regex.search(line.lower()):
-            return True
-    return False
-
-if have_cxx_shared_library():
-    config.available_features.add('cxx-shared-library')
 
 # Direct object generation
 if not 'hexagon' in config.target_triple:

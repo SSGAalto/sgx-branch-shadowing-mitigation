@@ -1205,7 +1205,6 @@ bool TwoAddressInstructionPass::tryInstructionCommute(MachineInstr *MI,
   if (!MI->isCommutable())
     return false;
 
-  bool MadeChange = false;
   unsigned DstOpReg = MI->getOperand(DstOpIdx).getReg();
   unsigned BaseOpReg = MI->getOperand(BaseOpIdx).getReg();
   unsigned OpsNum = MI->getDesc().getNumOperands();
@@ -1224,8 +1223,8 @@ bool TwoAddressInstructionPass::tryInstructionCommute(MachineInstr *MI,
 
     // If OtherOp dies but BaseOp does not, swap the OtherOp and BaseOp
     // operands. This makes the live ranges of DstOp and OtherOp joinable.
-    bool OtherOpKilled = isKilled(*MI, OtherOpReg, MRI, TII, LIS, false);
-    bool DoCommute = !BaseOpKilled && OtherOpKilled;
+    bool DoCommute =
+        !BaseOpKilled && isKilled(*MI, OtherOpReg, MRI, TII, LIS, false);
 
     if (!DoCommute &&
         isProfitableToCommute(DstOpReg, BaseOpReg, OtherOpReg, MI, Dist)) {
@@ -1236,21 +1235,13 @@ bool TwoAddressInstructionPass::tryInstructionCommute(MachineInstr *MI,
     // If it's profitable to commute, try to do so.
     if (DoCommute && commuteInstruction(MI, DstOpIdx, BaseOpIdx, OtherOpIdx,
                                         Dist)) {
-      MadeChange = true;
       ++NumCommuted;
-      if (AggressiveCommute) {
+      if (AggressiveCommute)
         ++NumAggrCommuted;
-        // There might be more than two commutable operands, update BaseOp and
-        // continue scanning.
-        BaseOpReg = OtherOpReg;
-        BaseOpKilled = OtherOpKilled;
-        continue;
-      }
-      // If this was a commute based on kill, we won't do better continuing.
-      return MadeChange;
+      return true;
     }
   }
-  return MadeChange;
+  return false;
 }
 
 /// For the case where an instruction has a single pair of tied register

@@ -24,7 +24,6 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/MathExtras.h"
-#include "llvm/Support/ErrorHandling.h"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -95,11 +94,7 @@ public:
 
   LLVM_ATTRIBUTE_RETURNS_NONNULL void *Allocate(size_t Size,
                                                 size_t /*Alignment*/) {
-    void* memPtr =  malloc(Size);
-    if (memPtr == nullptr) 
-      report_bad_alloc_error("Allocation in MallocAllocator failed.");
-
-    return memPtr;
+    return malloc(Size);
   }
 
   // Pull in base class overloads.
@@ -438,34 +433,6 @@ public:
   /// \brief Allocate space for an array of objects without constructing them.
   T *Allocate(size_t num = 1) { return Allocator.Allocate<T>(num); }
 };
-
-/// \{
-/// Counterparts of allocation functions defined in namespace 'std', which crash
-/// on allocation failure instead of returning null pointer.
-
-LLVM_ATTRIBUTE_RETURNS_NONNULL inline void *safe_malloc(size_t Sz) {
-  void *Result = std::malloc(Sz);
-  if (Result == nullptr)
-    report_bad_alloc_error("Allocation failed.");
-  return Result;
-}
-
-LLVM_ATTRIBUTE_RETURNS_NONNULL inline void *safe_calloc(size_t Count,
-                                                        size_t Sz) {
-  void *Result = std::calloc(Count, Sz);
-  if (Result == nullptr)
-    report_bad_alloc_error("Allocation failed.");
-  return Result;
-}
-
-LLVM_ATTRIBUTE_RETURNS_NONNULL inline void *safe_realloc(void *Ptr, size_t Sz) {
-  void *Result = std::realloc(Ptr, Sz);
-  if (Result == nullptr)
-    report_bad_alloc_error("Allocation failed.");
-  return Result;
-}
-
-/// \}
 
 } // end namespace llvm
 

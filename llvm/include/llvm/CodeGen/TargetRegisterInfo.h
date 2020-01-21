@@ -21,11 +21,11 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
+#include "llvm/CodeGen/MachineValueType.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/MC/LaneBitmask.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/MachineValueType.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/Printable.h"
 #include <cassert>
@@ -444,13 +444,6 @@ public:
     return false;
   }
 
-  /// Returns the original SrcReg unless it is the target of a copy-like
-  /// operation, in which case we chain backwards through all such operations
-  /// to the ultimate source register.  If a physical register is encountered,
-  /// we stop the search.
-  virtual unsigned lookThruCopyLike(unsigned SrcReg,
-                                    const MachineRegisterInfo *MRI) const;
-
   /// Return a null-terminated list of all of the callee-saved registers on
   /// this target. The register should be in the order of desired callee-save
   /// stack frame offset. The first register is closest to the incoming stack
@@ -758,9 +751,6 @@ public:
   /// Get the weight in units of pressure for this register class.
   virtual const RegClassWeight &getRegClassWeight(
     const TargetRegisterClass *RC) const = 0;
-
-  /// Returns size in bits of a phys/virtual/generic register.
-  unsigned getRegSizeInBits(unsigned Reg, const MachineRegisterInfo &MRI) const;
 
   /// Get the weight in units of pressure for this register unit.
   virtual unsigned getRegUnitWeight(unsigned RegUnit) const = 0;
@@ -1161,8 +1151,7 @@ struct VirtReg2IndexFunctor {
 ///
 /// Usage: OS << printReg(Reg, TRI, SubRegIdx) << '\n';
 Printable printReg(unsigned Reg, const TargetRegisterInfo *TRI = nullptr,
-                   unsigned SubRegIdx = 0,
-                   const MachineRegisterInfo *MRI = nullptr);
+                   unsigned SubRegIdx = 0);
 
 /// Create Printable object to print register units on a \ref raw_ostream.
 ///

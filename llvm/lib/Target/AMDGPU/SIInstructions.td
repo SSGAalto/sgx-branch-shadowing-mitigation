@@ -40,18 +40,15 @@ defm EXP_DONE : EXP_m<1, AMDGPUexport_done>;
 // VINTRP Instructions
 //===----------------------------------------------------------------------===//
 
-// Used to inject printing of "_e32" suffix for VI (there are "_e64" variants for VI)
-def VINTRPDst : VINTRPDstOperand <VGPR_32>;
-
 let Uses = [M0, EXEC] in {
 
 // FIXME: Specify SchedRW for VINTRP insturctions.
 
 multiclass V_INTERP_P1_F32_m : VINTRP_m <
   0x00000000,
-  (outs VINTRPDst:$vdst),
+  (outs VGPR_32:$vdst),
   (ins VGPR_32:$vsrc, Attr:$attr, AttrChan:$attrchan),
-  "v_interp_p1_f32$vdst, $vsrc, $attr$attrchan",
+  "v_interp_p1_f32 $vdst, $vsrc, $attr$attrchan",
   [(set f32:$vdst, (AMDGPUinterp_p1 f32:$vsrc, (i32 imm:$attrchan),
                                                (i32 imm:$attr)))]
 >;
@@ -72,9 +69,9 @@ let DisableEncoding = "$src0", Constraints = "$src0 = $vdst" in {
 
 defm V_INTERP_P2_F32 : VINTRP_m <
   0x00000001,
-  (outs VINTRPDst:$vdst),
+  (outs VGPR_32:$vdst),
   (ins VGPR_32:$src0, VGPR_32:$vsrc, Attr:$attr, AttrChan:$attrchan),
-  "v_interp_p2_f32$vdst, $vsrc, $attr$attrchan",
+  "v_interp_p2_f32 $vdst, $vsrc, $attr$attrchan",
   [(set f32:$vdst, (AMDGPUinterp_p2 f32:$src0, f32:$vsrc, (i32 imm:$attrchan),
                                                           (i32 imm:$attr)))]>;
 
@@ -82,9 +79,9 @@ defm V_INTERP_P2_F32 : VINTRP_m <
 
 defm V_INTERP_MOV_F32 : VINTRP_m <
   0x00000002,
-  (outs VINTRPDst:$vdst),
+  (outs VGPR_32:$vdst),
   (ins InterpSlot:$vsrc, Attr:$attr, AttrChan:$attrchan),
-  "v_interp_mov_f32$vdst, $vsrc, $attr$attrchan",
+  "v_interp_mov_f32 $vdst, $vsrc, $attr$attrchan",
   [(set f32:$vdst, (AMDGPUinterp_mov (i32 imm:$vsrc), (i32 imm:$attrchan),
                                      (i32 imm:$attr)))]>;
 
@@ -189,7 +186,6 @@ def S_XOR_B64_term : PseudoInstSI<(outs SReg_64:$dst),
   let SALU = 1;
   let isAsCheapAsAMove = 1;
   let isTerminator = 1;
-  let Defs = [SCC];
 }
 
 def S_ANDN2_B64_term : PseudoInstSI<(outs SReg_64:$dst),
@@ -250,6 +246,7 @@ def SI_IF: CFPseudoInstSI <
 def SI_ELSE : CFPseudoInstSI <
   (outs SReg_64:$dst),
   (ins SReg_64:$src, brtarget:$target, i1imm:$execfix), [], 1, 1> {
+  let Constraints = "$src = $dst";
   let Size = 12;
   let hasSideEffects = 1;
 }
@@ -1104,7 +1101,6 @@ let SubtargetPredicate = isGCN in {
 def : IMad24Pat<V_MAD_I32_I24, 1>;
 def : UMad24Pat<V_MAD_U32_U24, 1>;
 
-// FIXME: This should only be done for VALU inputs
 defm : BFIPatterns <V_BFI_B32, S_MOV_B32, SReg_64>;
 def : ROTRPattern <V_ALIGNBIT_B32>;
 
@@ -1494,7 +1490,7 @@ defm : BFMPatterns <i32, S_BFM_B32, S_MOV_B32>;
 // FIXME: defm : BFMPatterns <i64, S_BFM_B64, S_MOV_B64>;
 
 defm : BFEPattern <V_BFE_U32, V_BFE_I32, S_MOV_B32>;
-defm : SHA256MaPattern <V_BFI_B32, V_XOR_B32_e64, SReg_64>;
+def : SHA256MaPattern <V_BFI_B32, V_XOR_B32_e64>;
 
 def : IntMed3Pat<V_MED3_I32, smax, smax_oneuse, smin_oneuse>;
 def : IntMed3Pat<V_MED3_U32, umax, umax_oneuse, umin_oneuse>;

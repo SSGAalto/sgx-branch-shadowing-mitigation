@@ -635,8 +635,8 @@ public:
     return true;
   }
 
-  /// Generate code to reduce the loop iteration by one and check if the loop
-  /// is finished.  Return the value/register of the new loop count.  We need
+  /// Generate code to reduce the loop iteration by one and check if the loop is
+  /// finished.  Return the value/register of the the new loop count.  We need
   /// this function when peeling off one or more iterations of a loop. This
   /// function assumes the nth iteration is peeled first.
   virtual unsigned reduceLoopCount(MachineBasicBlock &MBB, MachineInstr *IndVar,
@@ -956,11 +956,6 @@ public:
   /// Return true if the given SDNode can be copied during scheduling
   /// even if it has glue.
   virtual bool canCopyGluedNodeDuringSchedule(SDNode *N) const { return false; }
-
-  /// Remember what registers the specified instruction uses and modifies.
-  virtual void trackRegDefsUses(const MachineInstr &MI, BitVector &ModifiedRegs,
-                                BitVector &UsedRegs,
-                                const TargetRegisterInfo *TRI) const;
 
 protected:
   /// Target-dependent implementation for foldMemoryOperand.
@@ -1574,9 +1569,6 @@ public:
     return false;
   }
 
-  /// Returns true if the target implements the MachineOutliner.
-  virtual bool useMachineOutliner() const { return false; }
-
   /// \brief Describes the number of instructions that it will take to call and
   /// construct a frame for a given outlining candidate.
   struct MachineOutlinerInfo {
@@ -1611,7 +1603,7 @@ public:
           std::pair<MachineBasicBlock::iterator, MachineBasicBlock::iterator>>
           &RepeatedSequenceLocs) const {
     llvm_unreachable(
-        "Target didn't implement TargetInstrInfo::getOutliningCandidateInfo!");
+        "Target didn't implement TargetInstrInfo::getOutliningOverhead!");
   }
 
   /// Represents how an instruction should be mapped by the outliner.
@@ -1622,16 +1614,9 @@ public:
   enum MachineOutlinerInstrType { Legal, Illegal, Invisible };
 
   /// Returns how or if \p MI should be outlined.
-  virtual MachineOutlinerInstrType
-  getOutliningType(MachineBasicBlock::iterator &MIT, unsigned Flags) const {
+  virtual MachineOutlinerInstrType getOutliningType(MachineInstr &MI) const {
     llvm_unreachable(
         "Target didn't implement TargetInstrInfo::getOutliningType!");
-  }
-
-  /// \brief Returns target-defined flags defining properties of the MBB for
-  /// the outliner.
-  virtual unsigned getMachineOutlinerMBBFlags(MachineBasicBlock &MBB) const {
-    return 0x0;
   }
 
   /// Insert a custom epilogue for outlined functions.

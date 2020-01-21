@@ -98,8 +98,7 @@ struct COFFShortExport {
 
 Error writeImportLibrary(StringRef ImportName, StringRef Path,
                          ArrayRef<COFFShortExport> Exports,
-                         COFF::MachineTypes Machine, bool MakeWeakAliases,
-                         bool MinGW);
+                         COFF::MachineTypes Machine, bool MakeWeakAliases);
 
 } // namespace object
 } // namespace llvm

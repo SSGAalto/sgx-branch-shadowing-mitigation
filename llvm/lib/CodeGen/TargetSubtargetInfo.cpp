@@ -68,15 +68,17 @@ bool TargetSubtargetInfo::useAA() const {
 }
 
 static std::string createSchedInfoStr(unsigned Latency,
-                                      Optional<double> RThroughput) {
+                                     Optional<double> RThroughput) {
   static const char *SchedPrefix = " sched: [";
   std::string Comment;
   raw_string_ostream CS(Comment);
-  if (RThroughput.hasValue())
+  if (Latency > 0 && RThroughput.hasValue())
     CS << SchedPrefix << Latency << format(":%2.2f", RThroughput.getValue())
        << "]";
-  else
+  else if (Latency > 0)
     CS << SchedPrefix << Latency << ":?]";
+  else if (RThroughput.hasValue())
+    CS << SchedPrefix << "?:" << RThroughput.getValue() << "]";
   CS.flush();
   return Comment;
 }
@@ -88,7 +90,7 @@ std::string TargetSubtargetInfo::getSchedInfoStr(const MachineInstr &MI) const {
   // We don't cache TSchedModel because it depends on TargetInstrInfo
   // that could be changed during the compilation
   TargetSchedModel TSchedModel;
-  TSchedModel.init(this);
+  TSchedModel.init(getSchedModel(), this, getInstrInfo());
   unsigned Latency = TSchedModel.computeInstrLatency(&MI);
   Optional<double> RThroughput = TSchedModel.computeInstrRThroughput(&MI);
   return createSchedInfoStr(Latency, RThroughput);
@@ -99,7 +101,7 @@ std::string TargetSubtargetInfo::getSchedInfoStr(MCInst const &MCI) const {
   // We don't cache TSchedModel because it depends on TargetInstrInfo
   // that could be changed during the compilation
   TargetSchedModel TSchedModel;
-  TSchedModel.init(this);
+  TSchedModel.init(getSchedModel(), this, getInstrInfo());
   unsigned Latency;
   if (TSchedModel.hasInstrSchedModel())
     Latency = TSchedModel.computeInstrLatency(MCI.getOpcode());
@@ -112,7 +114,4 @@ std::string TargetSubtargetInfo::getSchedInfoStr(MCInst const &MCI) const {
   Optional<double> RThroughput =
       TSchedModel.computeInstrRThroughput(MCI.getOpcode());
   return createSchedInfoStr(Latency, RThroughput);
-}
-
-void TargetSubtargetInfo::mirFileLoaded(MachineFunction &MF) const {
 }

@@ -28,10 +28,8 @@ class PredicateControl {
   list<Predicate> PTRPredicates = [];
   // Predicates for the FGR size and layout such as IsFP64bit
   list<Predicate> FGRPredicates = [];
-  // Predicates for the instruction group membership such as ISA's.
+  // Predicates for the instruction group membership such as ISA's and ASE's
   list<Predicate> InsnPredicates = [];
-  // Predicate for the ASE that an instruction belongs to.
-  list<Predicate> ASEPredicate = [];
   // Predicate for marking the instruction as usable in hard-float mode only.
   list<Predicate> HardFloatPredicate = [];
   // Predicates for anything else
@@ -42,7 +40,6 @@ class PredicateControl {
                                            FGRPredicates,
                                            InsnPredicates,
                                            HardFloatPredicate,
-                                           ASEPredicate,
                                            AdditionalPredicates);
 }
 
@@ -176,8 +173,6 @@ def FeatureMSA : SubtargetFeature<"msa", "HasMSA", "true", "Mips MSA ASE">;
 
 def FeatureEVA : SubtargetFeature<"eva", "HasEVA", "true", "Mips EVA ASE">;
 
-def FeatureCRC : SubtargetFeature<"crc", "HasCRC", "true", "Mips R6 CRC ASE">;
-
 def FeatureMicroMips  : SubtargetFeature<"micromips", "InMicroMipsMode", "true",
                                          "microMips mode">;
 
@@ -198,10 +193,6 @@ def FeatureMT : SubtargetFeature<"mt", "HasMT", "true", "Mips MT ASE">;
 def FeatureLongCalls : SubtargetFeature<"long-calls", "UseLongCalls", "true",
                                         "Disable use of the jal instruction">;
 
-def FeatureUseIndirectJumpsHazard : SubtargetFeature<"use-indirect-jump-hazard",
-                                                    "UseIndirectJumpsHazard",
-                                                    "true", "Use indirect jump"
-                        " guards to prevent certain speculation based attacks">;
 //===----------------------------------------------------------------------===//
 // Mips processors supported.
 //===----------------------------------------------------------------------===//
@@ -247,5 +238,4 @@ def Mips : Target {
   let InstructionSet = MipsInstrInfo;
   let AssemblyParsers = [MipsAsmParser];
   let AssemblyParserVariants = [MipsAsmParserVariant];
-  let AllowRegisterRenaming = 1;
 }

@@ -22,6 +22,7 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
+#include "llvm/CodeGen/MachineValueType.h"
 #include "llvm/CodeGen/RuntimeLibcalls.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
@@ -40,7 +41,6 @@
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/MachineValueType.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
@@ -1623,7 +1623,6 @@ bool SelectionDAGLegalize::LegalizeSetCCCondCode(EVT VT, SDValue &LHS,
   MVT OpVT = LHS.getSimpleValueType();
   ISD::CondCode CCCode = cast<CondCodeSDNode>(CC)->get();
   NeedInvert = false;
-  bool NeedSwap = false;
   switch (TLI.getCondCodeAction(CCCode, OpVT)) {
   default: llvm_unreachable("Unknown condition code action!");
   case TargetLowering::Legal:
@@ -1631,37 +1630,23 @@ bool SelectionDAGLegalize::LegalizeSetCCCondCode(EVT VT, SDValue &LHS,
     break;
   case TargetLowering::Expand: {
     ISD::CondCode InvCC = ISD::getSetCCSwappedOperands(CCCode);
-    if (TLI.isCondCodeLegalOrCustom(InvCC, OpVT)) {
+    if (TLI.isCondCodeLegal(InvCC, OpVT)) {
       std::swap(LHS, RHS);
       CC = DAG.getCondCode(InvCC);
       return true;
     }
-    // Swapping operands didn't work. Try inverting the condition.
-    InvCC = getSetCCInverse(CCCode, OpVT.isInteger());
-    if (!TLI.isCondCodeLegalOrCustom(InvCC, OpVT)) {
-      // If inverting the condition is not enough, try swapping operands
-      // on top of it.
-      InvCC = ISD::getSetCCSwappedOperands(InvCC);
-      NeedSwap = true;
-    }
-    if (TLI.isCondCodeLegalOrCustom(InvCC, OpVT)) {
-      CC = DAG.getCondCode(InvCC);
-      NeedInvert = true;
-      if (NeedSwap)
-        std::swap(LHS, RHS);
-      return true;
-    }
-
     ISD::CondCode CC1 = ISD::SETCC_INVALID, CC2 = ISD::SETCC_INVALID;
     unsigned Opc = 0;
     switch (CCCode) {
     default: llvm_unreachable("Don't know how to expand this condition!");
     case ISD::SETO:
-        assert(TLI.isCondCodeLegal(ISD::SETOEQ, OpVT)
+        assert(TLI.getCondCodeAction(ISD::SETOEQ, OpVT)
+            == TargetLowering::Legal
             && "If SETO is expanded, SETOEQ must be legal!");
         CC1 = ISD::SETOEQ; CC2 = ISD::SETOEQ; Opc = ISD::AND; break;
     case ISD::SETUO:
-        assert(TLI.isCondCodeLegal(ISD::SETUNE, OpVT)
+        assert(TLI.getCondCodeAction(ISD::SETUNE, OpVT)
+            == TargetLowering::Legal
             && "If SETUO is expanded, SETUNE must be legal!");
         CC1 = ISD::SETUNE; CC2 = ISD::SETUNE; Opc = ISD::OR;  break;
     case ISD::SETOEQ:
@@ -1691,10 +1676,20 @@ bool SelectionDAGLegalize::LegalizeSetCCCondCode(EVT VT, SDValue &LHS,
     case ISD::SETGT:
     case ISD::SETGE:
     case ISD::SETLT:
+      // We only support using the inverted operation, which is computed above
+      // and not a different manner of supporting expanding these cases.
+      llvm_unreachable("Don't know how to expand this condition!");
     case ISD::SETNE:
     case ISD::SETEQ:
-      // If all combinations of inverting the condition and swapping operands
-      // didn't work then we have no means to expand the condition.
+      // Try inverting the result of the inverse condition.
+      InvCC = CCCode == ISD::SETEQ ? ISD::SETNE : ISD::SETEQ;
+      if (TLI.isCondCodeLegal(InvCC, OpVT)) {
+        CC = DAG.getCondCode(InvCC);
+        NeedInvert = true;
+        return true;
+      }
+      // If inverting the condition didn't work then we have no means to expand
+      // the condition.
       llvm_unreachable("Don't know how to expand this condition!");
     }
 
@@ -3706,8 +3701,7 @@ bool SelectionDAGLegalize::ExpandNode(SDNode *Node) {
       Addr = DAG.getNode(ISD::ADD, dl, PTy, Addr,
                           TLI.getPICJumpTableRelocBase(Table, DAG));
     }
-
-    Tmp1 = TLI.expandIndirectJTBranch(dl, LD.getValue(1), Addr, DAG);
+    Tmp1 = DAG.getNode(ISD::BRIND, dl, MVT::Other, LD.getValue(1), Addr);
     Results.push_back(Tmp1);
     break;
   }
@@ -3765,7 +3759,7 @@ bool SelectionDAGLegalize::ExpandNode(SDNode *Node) {
     // illegal; expand it into a SELECT_CC.
     EVT VT = Node->getValueType(0);
     int TrueValue;
-    switch (TLI.getBooleanContents(Tmp1.getValueType())) {
+    switch (TLI.getBooleanContents(Tmp1->getValueType(0))) {
     case TargetLowering::ZeroOrOneBooleanContent:
     case TargetLowering::UndefinedBooleanContent:
       TrueValue = 1;
@@ -3790,7 +3784,7 @@ bool SelectionDAGLegalize::ExpandNode(SDNode *Node) {
     SDValue CC = Node->getOperand(4);
     ISD::CondCode CCOp = cast<CondCodeSDNode>(CC)->get();
 
-    if (TLI.isCondCodeLegalOrCustom(CCOp, Tmp1.getSimpleValueType())) {
+    if (TLI.isCondCodeLegal(CCOp, Tmp1.getSimpleValueType())) {
       // If the condition code is legal, then we need to expand this
       // node using SETCC and SELECT.
       EVT CmpVT = Tmp1.getValueType();
@@ -3811,7 +3805,7 @@ bool SelectionDAGLegalize::ExpandNode(SDNode *Node) {
     // version (or vice versa).
     ISD::CondCode InvCC = ISD::getSetCCInverse(CCOp,
                                                Tmp1.getValueType().isInteger());
-    if (TLI.isCondCodeLegalOrCustom(InvCC, Tmp1.getSimpleValueType())) {
+    if (TLI.isCondCodeLegal(InvCC, Tmp1.getSimpleValueType())) {
       // Use the new condition code and swap true and false
       Legalized = true;
       Tmp1 = DAG.getSelectCC(dl, Tmp1, Tmp2, Tmp4, Tmp3, InvCC);
@@ -3819,7 +3813,7 @@ bool SelectionDAGLegalize::ExpandNode(SDNode *Node) {
       // If The inverse is not legal, then try to swap the arguments using
       // the inverse condition code.
       ISD::CondCode SwapInvCC = ISD::getSetCCSwappedOperands(InvCC);
-      if (TLI.isCondCodeLegalOrCustom(SwapInvCC, Tmp1.getSimpleValueType())) {
+      if (TLI.isCondCodeLegal(SwapInvCC, Tmp1.getSimpleValueType())) {
         // The swapped inverse condition is legal, so swap true and false,
         // lhs and rhs.
         Legalized = true;
@@ -3940,8 +3934,6 @@ void SelectionDAGLegalize::ConvertNodeToLibcall(SDNode *Node) {
   DEBUG(dbgs() << "Trying to convert node to libcall\n");
   SmallVector<SDValue, 8> Results;
   SDLoc dl(Node);
-  // FIXME: Check flags on the node to see if we can use a finite call.
-  bool CanUseFiniteLibCall = TM.Options.NoInfsFPMath && TM.Options.NoNaNsFPMath;
   unsigned Opc = Node->getOpcode();
   switch (Opc) {
   case ISD::ATOMIC_FENCE: {
@@ -3970,7 +3962,6 @@ void SelectionDAGLegalize::ConvertNodeToLibcall(SDNode *Node) {
   case ISD::ATOMIC_LOAD_ADD:
   case ISD::ATOMIC_LOAD_SUB:
   case ISD::ATOMIC_LOAD_AND:
-  case ISD::ATOMIC_LOAD_CLR:
   case ISD::ATOMIC_LOAD_OR:
   case ISD::ATOMIC_LOAD_XOR:
   case ISD::ATOMIC_LOAD_NAND:
@@ -4037,68 +4028,33 @@ void SelectionDAGLegalize::ConvertNodeToLibcall(SDNode *Node) {
     break;
   case ISD::FLOG:
   case ISD::STRICT_FLOG:
-    if (CanUseFiniteLibCall && DAG.getLibInfo().has(LibFunc_log_finite))
-      Results.push_back(ExpandFPLibCall(Node, RTLIB::LOG_FINITE_F32,
-                                        RTLIB::LOG_FINITE_F64,
-                                        RTLIB::LOG_FINITE_F80,
-                                        RTLIB::LOG_FINITE_F128,
-                                        RTLIB::LOG_FINITE_PPCF128));
-    else
-      Results.push_back(ExpandFPLibCall(Node, RTLIB::LOG_F32, RTLIB::LOG_F64,
-                                        RTLIB::LOG_F80, RTLIB::LOG_F128,
-                                        RTLIB::LOG_PPCF128));
+    Results.push_back(ExpandFPLibCall(Node, RTLIB::LOG_F32, RTLIB::LOG_F64,
+                                      RTLIB::LOG_F80, RTLIB::LOG_F128,
+                                      RTLIB::LOG_PPCF128));
     break;
   case ISD::FLOG2:
   case ISD::STRICT_FLOG2:
-    if (CanUseFiniteLibCall && DAG.getLibInfo().has(LibFunc_log2_finite))
-      Results.push_back(ExpandFPLibCall(Node, RTLIB::LOG2_FINITE_F32,
-                                        RTLIB::LOG2_FINITE_F64,
-                                        RTLIB::LOG2_FINITE_F80,
-                                        RTLIB::LOG2_FINITE_F128,
-                                        RTLIB::LOG2_FINITE_PPCF128));
-    else
-      Results.push_back(ExpandFPLibCall(Node, RTLIB::LOG2_F32, RTLIB::LOG2_F64,
-                                        RTLIB::LOG2_F80, RTLIB::LOG2_F128,
-                                        RTLIB::LOG2_PPCF128));
+    Results.push_back(ExpandFPLibCall(Node, RTLIB::LOG2_F32, RTLIB::LOG2_F64,
+                                      RTLIB::LOG2_F80, RTLIB::LOG2_F128,
+                                      RTLIB::LOG2_PPCF128));
     break;
   case ISD::FLOG10:
   case ISD::STRICT_FLOG10:
-    if (CanUseFiniteLibCall && DAG.getLibInfo().has(LibFunc_log10_finite))
-      Results.push_back(ExpandFPLibCall(Node, RTLIB::LOG10_FINITE_F32,
-                                        RTLIB::LOG10_FINITE_F64,
-                                        RTLIB::LOG10_FINITE_F80,
-                                        RTLIB::LOG10_FINITE_F128,
-                                        RTLIB::LOG10_FINITE_PPCF128));
-    else
-      Results.push_back(ExpandFPLibCall(Node, RTLIB::LOG10_F32, RTLIB::LOG10_F64,
-                                        RTLIB::LOG10_F80, RTLIB::LOG10_F128,
-                                        RTLIB::LOG10_PPCF128));
+    Results.push_back(ExpandFPLibCall(Node, RTLIB::LOG10_F32, RTLIB::LOG10_F64,
+                                      RTLIB::LOG10_F80, RTLIB::LOG10_F128,
+                                      RTLIB::LOG10_PPCF128));
     break;
   case ISD::FEXP:
   case ISD::STRICT_FEXP:
-    if (CanUseFiniteLibCall && DAG.getLibInfo().has(LibFunc_exp_finite))
-      Results.push_back(ExpandFPLibCall(Node, RTLIB::EXP_FINITE_F32,
-                                        RTLIB::EXP_FINITE_F64,
-                                        RTLIB::EXP_FINITE_F80,
-                                        RTLIB::EXP_FINITE_F128,
-                                        RTLIB::EXP_FINITE_PPCF128));
-    else
-      Results.push_back(ExpandFPLibCall(Node, RTLIB::EXP_F32, RTLIB::EXP_F64,
-                                        RTLIB::EXP_F80, RTLIB::EXP_F128,
-                                        RTLIB::EXP_PPCF128));
+    Results.push_back(ExpandFPLibCall(Node, RTLIB::EXP_F32, RTLIB::EXP_F64,
+                                      RTLIB::EXP_F80, RTLIB::EXP_F128,
+                                      RTLIB::EXP_PPCF128));
     break;
   case ISD::FEXP2:
   case ISD::STRICT_FEXP2:
-    if (CanUseFiniteLibCall && DAG.getLibInfo().has(LibFunc_exp2_finite))
-      Results.push_back(ExpandFPLibCall(Node, RTLIB::EXP2_FINITE_F32,
-                                        RTLIB::EXP2_FINITE_F64,
-                                        RTLIB::EXP2_FINITE_F80,
-                                        RTLIB::EXP2_FINITE_F128,
-                                        RTLIB::EXP2_FINITE_PPCF128));
-    else
-      Results.push_back(ExpandFPLibCall(Node, RTLIB::EXP2_F32, RTLIB::EXP2_F64,
-                                        RTLIB::EXP2_F80, RTLIB::EXP2_F128,
-                                        RTLIB::EXP2_PPCF128));
+    Results.push_back(ExpandFPLibCall(Node, RTLIB::EXP2_F32, RTLIB::EXP2_F64,
+                                      RTLIB::EXP2_F80, RTLIB::EXP2_F128,
+                                      RTLIB::EXP2_PPCF128));
     break;
   case ISD::FTRUNC:
     Results.push_back(ExpandFPLibCall(Node, RTLIB::TRUNC_F32, RTLIB::TRUNC_F64,
@@ -4144,16 +4100,9 @@ void SelectionDAGLegalize::ConvertNodeToLibcall(SDNode *Node) {
     break;
   case ISD::FPOW:
   case ISD::STRICT_FPOW:
-    if (CanUseFiniteLibCall && DAG.getLibInfo().has(LibFunc_pow_finite))
-      Results.push_back(ExpandFPLibCall(Node, RTLIB::POW_FINITE_F32,
-                                        RTLIB::POW_FINITE_F64,
-                                        RTLIB::POW_FINITE_F80,
-                                        RTLIB::POW_FINITE_F128,
-                                        RTLIB::POW_FINITE_PPCF128));
-    else
-      Results.push_back(ExpandFPLibCall(Node, RTLIB::POW_F32, RTLIB::POW_F64,
-                                        RTLIB::POW_F80, RTLIB::POW_F128,
-                                        RTLIB::POW_PPCF128));
+    Results.push_back(ExpandFPLibCall(Node, RTLIB::POW_F32, RTLIB::POW_F64,
+                                      RTLIB::POW_F80, RTLIB::POW_F128,
+                                      RTLIB::POW_PPCF128));
     break;
   case ISD::FDIV:
     Results.push_back(ExpandFPLibCall(Node, RTLIB::DIV_F32, RTLIB::DIV_F64,
@@ -4307,8 +4256,7 @@ void SelectionDAGLegalize::PromoteNode(SDNode *Node) {
         ISD::SRL, dl, NVT, Tmp1,
         DAG.getConstant(DiffBits, dl,
                         TLI.getShiftAmountTy(NVT, DAG.getDataLayout())));
-
-    Results.push_back(DAG.getNode(ISD::TRUNCATE, dl, OVT, Tmp1));
+    Results.push_back(Tmp1);
     break;
   }
   case ISD::FP_TO_UINT:

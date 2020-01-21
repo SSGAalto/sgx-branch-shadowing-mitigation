@@ -23,10 +23,6 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
-#include "llvm/CodeGen/GlobalISel/IRTranslator.h"
-#include "llvm/CodeGen/GlobalISel/Legalizer.h"
-#include "llvm/CodeGen/GlobalISel/RegBankSelect.h"
-#include "llvm/CodeGen/GlobalISel/InstructionSelect.h"
 #include "llvm/CodeGen/BasicTTIImpl.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/Passes.h"
@@ -50,9 +46,6 @@ extern "C" void LLVMInitializeMipsTarget() {
   RegisterTargetMachine<MipselTargetMachine> Y(getTheMipselTarget());
   RegisterTargetMachine<MipsebTargetMachine> A(getTheMips64Target());
   RegisterTargetMachine<MipselTargetMachine> B(getTheMips64elTarget());
-
-  PassRegistry *PR = PassRegistry::getPassRegistry();
-  initializeGlobalISel(*PR);
 }
 
 static std::string computeDataLayout(const Triple &TT, StringRef CPU,
@@ -237,10 +230,6 @@ public:
   bool addInstSelector() override;
   void addPreEmitPass() override;
   void addPreRegAlloc() override;
-  bool addIRTranslator() override;
-  bool addLegalizeMachineIR() override;
-  bool addRegBankSelect() override;
-  bool addGlobalInstructionSelect() override;
 };
 
 } // end anonymous namespace
@@ -295,24 +284,4 @@ void MipsPassConfig::addPreEmitPass() {
   addPass(createMipsLongBranchPass());
   addPass(createMipsHazardSchedule());
   addPass(createMipsConstantIslandPass());
-}
-
-bool MipsPassConfig::addIRTranslator() {
-  addPass(new IRTranslator());
-  return false;
-}
-
-bool MipsPassConfig::addLegalizeMachineIR() {
-  addPass(new Legalizer());
-  return false;
-}
-
-bool MipsPassConfig::addRegBankSelect() {
-  addPass(new RegBankSelect());
-  return false;
-}
-
-bool MipsPassConfig::addGlobalInstructionSelect() {
-  addPass(new InstructionSelect());
-  return false;
 }

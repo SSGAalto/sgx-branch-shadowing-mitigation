@@ -105,23 +105,12 @@ static bool setRetNonNull(Function &F) {
   return true;
 }
 
-static bool setNonLazyBind(Function &F) {
-  if (F.hasFnAttribute(Attribute::NonLazyBind))
-    return false;
-  F.addFnAttr(Attribute::NonLazyBind);
-  return true;
-}
-
 bool llvm::inferLibFuncAttributes(Function &F, const TargetLibraryInfo &TLI) {
   LibFunc TheLibFunc;
   if (!(TLI.getLibFunc(F, TheLibFunc) && TLI.has(TheLibFunc)))
     return false;
 
   bool Changed = false;
-
-  if (F.getParent() != nullptr && F.getParent()->getRtLibUseGOT())
-    Changed |= setNonLazyBind(F);
-
   switch (TheLibFunc) {
   case LibFunc_strlen:
   case LibFunc_wcslen:
@@ -717,19 +706,6 @@ bool llvm::inferLibFuncAttributes(Function &F, const TargetLibraryInfo &TLI) {
     // FIXME: It'd be really nice to cover all the library functions we're
     // aware of here.
     return false;
-  }
-}
-
-bool llvm::hasUnaryFloatFn(const TargetLibraryInfo *TLI, Type *Ty,
-                           LibFunc DoubleFn, LibFunc FloatFn,
-                           LibFunc LongDoubleFn) {
-  switch (Ty->getTypeID()) {
-  case Type::FloatTyID:
-    return TLI->has(FloatFn);
-  case Type::DoubleTyID:
-    return TLI->has(DoubleFn);
-  default:
-    return TLI->has(LongDoubleFn);
   }
 }
 

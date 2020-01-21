@@ -26,10 +26,6 @@
 
 using namespace llvm;
 
-// Include the auto-generated portion of the compress emitter.
-#define GEN_COMPRESS_INSTR
-#include "RISCVGenCompressInstEmitter.inc"
-
 namespace {
 struct RISCVOperand;
 
@@ -264,26 +260,12 @@ public:
            (VK == RISCVMCExpr::VK_RISCV_None || VK == RISCVMCExpr::VK_RISCV_LO);
   }
 
-  bool isSImm6NonZero() const {
-    RISCVMCExpr::VariantKind VK;
-    int64_t Imm;
-    bool IsValid;
-    bool IsConstantImm = evaluateConstantImm(Imm, VK);
-    if (!IsConstantImm)
-      IsValid = RISCVAsmParser::classifySymbolRef(getImm(), VK, Imm);
-    else
-      IsValid = ((Imm != 0) && isInt<6>(Imm));
-    return IsValid &&
-           (VK == RISCVMCExpr::VK_RISCV_None || VK == RISCVMCExpr::VK_RISCV_LO);
-  }
-
-  bool isCLUIImm() const {
+  bool isUImm6NonZero() const {
     int64_t Imm;
     RISCVMCExpr::VariantKind VK;
     bool IsConstantImm = evaluateConstantImm(Imm, VK);
-    return IsConstantImm && (Imm != 0) &&
-           (isUInt<5>(Imm) || (Imm >= 0xfffe0 && Imm <= 0xfffff)) &&
-            VK == RISCVMCExpr::VK_RISCV_None;
+    return IsConstantImm && isUInt<6>(Imm) && (Imm != 0) &&
+           VK == RISCVMCExpr::VK_RISCV_None;
   }
 
   bool isUImm7Lsb00() const {
@@ -339,9 +321,8 @@ public:
       IsValid = RISCVAsmParser::classifySymbolRef(getImm(), VK, Imm);
     else
       IsValid = isInt<12>(Imm);
-    return IsValid && (VK == RISCVMCExpr::VK_RISCV_None ||
-                       VK == RISCVMCExpr::VK_RISCV_LO ||
-                       VK == RISCVMCExpr::VK_RISCV_PCREL_LO);
+    return IsValid &&
+           (VK == RISCVMCExpr::VK_RISCV_None || VK == RISCVMCExpr::VK_RISCV_LO);
   }
 
   bool isSImm12Lsb0() const { return isBareSimmNLsb0<12>(); }
@@ -357,11 +338,11 @@ public:
 
   bool isSImm13Lsb0() const { return isBareSimmNLsb0<13>(); }
 
-  bool isSImm10Lsb0000NonZero() const {
+  bool isSImm10Lsb0000() const {
     int64_t Imm;
     RISCVMCExpr::VariantKind VK;
     bool IsConstantImm = evaluateConstantImm(Imm, VK);
-    return IsConstantImm && (Imm != 0) && isShiftedInt<6, 4>(Imm) &&
+    return IsConstantImm && isShiftedInt<6, 4>(Imm) &&
            VK == RISCVMCExpr::VK_RISCV_None;
   }
 
@@ -599,14 +580,10 @@ bool RISCVAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   switch (MatchInstructionImpl(Operands, Inst, ErrorInfo, MatchingInlineAsm)) {
   default:
     break;
-  case Match_Success: {
-    MCInst CInst;
-    bool Res = compressInst(CInst, Inst, getSTI(), Out.getContext());
-    CInst.setLoc(IDLoc);
+  case Match_Success:
     Inst.setLoc(IDLoc);
-    Out.EmitInstruction((Res ? CInst : Inst), getSTI());
+    Out.EmitInstruction(Inst, getSTI());
     return false;
-  }
   case Match_MissingFeature:
     return Error(IDLoc, "instruction use requires an option to be enabled");
   case Match_MnemonicFail:
@@ -636,14 +613,8 @@ bool RISCVAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   case Match_InvalidSImm6:
     return generateImmOutOfRangeError(Operands, ErrorInfo, -(1 << 5),
                                       (1 << 5) - 1);
-  case Match_InvalidSImm6NonZero:
-    return generateImmOutOfRangeError(Operands, ErrorInfo, -(1 << 5),
-                                      (1 << 5) - 1,
-        "immediate must be non-zero in the range");
-  case Match_InvalidCLUIImm:
-    return generateImmOutOfRangeError(
-        Operands, ErrorInfo, 1, (1 << 5) - 1,
-        "immediate must be in [0xfffe0, 0xfffff] or");
+  case Match_InvalidUImm6NonZero:
+    return generateImmOutOfRangeError(Operands, ErrorInfo, 1, (1 << 6) - 1);
   case Match_InvalidUImm7Lsb00:
     return generateImmOutOfRangeError(
         Operands, ErrorInfo, 0, (1 << 7) - 4,
@@ -668,10 +639,10 @@ bool RISCVAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     return generateImmOutOfRangeError(
         Operands, ErrorInfo, 4, (1 << 10) - 4,
         "immediate must be a multiple of 4 bytes in the range");
-  case Match_InvalidSImm10Lsb0000NonZero:
+  case Match_InvalidSImm10Lsb0000:
     return generateImmOutOfRangeError(
         Operands, ErrorInfo, -(1 << 9), (1 << 9) - 16,
-        "immediate must be a multiple of 16 bytes and non-zero in the range");
+        "immediate must be a multiple of 16 bytes in the range");
   case Match_InvalidSImm12:
     return generateImmOutOfRangeError(Operands, ErrorInfo, -(1 << 11),
                                       (1 << 11) - 1);
@@ -953,7 +924,7 @@ bool RISCVAsmParser::classifySymbolRef(const MCExpr *Expr,
       isa<MCSymbolRefExpr>(BE->getRHS()))
     return true;
 
-  // See if the addend is a constant, otherwise there's more going
+  // See if the addend is is a constant, otherwise there's more going
   // on here than we can deal with.
   auto AddendExpr = dyn_cast<MCConstantExpr>(BE->getRHS());
   if (!AddendExpr)

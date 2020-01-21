@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/DebugInfo/DWARF/DWARFDie.h"
+#include "SyntaxHighlighting.h"
 #include "llvm/ADT/None.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringRef.h"
@@ -21,9 +22,7 @@
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/DataExtractor.h"
 #include "llvm/Support/Format.h"
-#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/MathExtras.h"
-#include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cassert>
@@ -35,6 +34,7 @@
 using namespace llvm;
 using namespace dwarf;
 using namespace object;
+using namespace syntax;
 
 static void dumpApplePropertyAttribute(raw_ostream &OS, uint64_t Val) {
   OS << " (";
@@ -62,11 +62,13 @@ static void dumpRanges(const DWARFObject &Obj, raw_ostream &OS,
   if (DumpOpts.Verbose)
     SectionNames = Obj.getSectionNames();
 
-  for (const DWARFAddressRange &R : Ranges) {
+  for (size_t I = 0; I < Ranges.size(); ++I) {
+    const DWARFAddressRange &R = Ranges[I];
 
     OS << '\n';
     OS.indent(Indent);
-    R.dump(OS, AddressSize);
+    OS << format("[0x%0*" PRIx64 " - 0x%0*" PRIx64 ")", AddressSize * 2,
+                 R.LowPC, AddressSize * 2, R.HighPC);
 
     if (SectionNames.empty() || R.SectionIndex == -1ULL)
       continue;
@@ -189,10 +191,19 @@ static void dumpAttribute(raw_ostream &OS, const DWARFDie &Die,
   const char BaseIndent[] = "            ";
   OS << BaseIndent;
   OS.indent(Indent + 2);
-  WithColor(OS, HighlightColor::Attribute) << formatv("{0}", Attr);
+  auto attrString = AttributeString(Attr);
+  if (!attrString.empty())
+    WithColor(OS, syntax::Attribute) << attrString;
+  else
+    WithColor(OS, syntax::Attribute).get() << format("DW_AT_Unknown_%x", Attr);
 
-  if (DumpOpts.Verbose || DumpOpts.ShowForm)
-    OS << formatv(" [{0}]", Form);
+  if (DumpOpts.Verbose || DumpOpts.ShowForm) {
+    auto formString = FormEncodingString(Form);
+    if (!formString.empty())
+      OS << " [" << formString << ']';
+    else
+      OS << format(" [DW_FORM_Unknown_%x]", Form);
+  }
 
   DWARFUnit *U = Die.getDwarfUnit();
   DWARFFormValue formValue(Form);
@@ -205,9 +216,9 @@ static void dumpAttribute(raw_ostream &OS, const DWARFDie &Die,
 
   StringRef Name;
   std::string File;
-  auto Color = HighlightColor::Enumerator;
+  auto Color = syntax::Enumerator;
   if (Attr == DW_AT_decl_file || Attr == DW_AT_call_file) {
-    Color = HighlightColor::String;
+    Color = syntax::String;
     if (const auto *LT = U->getContext().getLineTableForUnit(U))
       if (LT->getFileNameByIndex(
               formValue.getAsUnsignedConstant().getValue(),
@@ -450,14 +461,18 @@ void DWARFDie::dump(raw_ostream &OS, unsigned Indent,
   if (debug_info_data.isValidOffset(offset)) {
     uint32_t abbrCode = debug_info_data.getULEB128(&offset);
     if (DumpOpts.ShowAddresses)
-      WithColor(OS, HighlightColor::Address).get()
-          << format("\n0x%8.8x: ", Offset);
+      WithColor(OS, syntax::Address).get() << format("\n0x%8.8x: ", Offset);
 
     if (abbrCode) {
       auto AbbrevDecl = getAbbreviationDeclarationPtr();
       if (AbbrevDecl) {
-        WithColor(OS, HighlightColor::Tag).get().indent(Indent)
-            << formatv("{0}", getTag());
+        auto tagString = TagString(getTag());
+        if (!tagString.empty())
+          WithColor(OS, syntax::Tag).get().indent(Indent) << tagString;
+        else
+          WithColor(OS, syntax::Tag).get().indent(Indent)
+              << format("DW_TAG_Unknown_%x", getTag());
+
         if (DumpOpts.Verbose)
           OS << format(" [%u] %c", abbrCode,
                        AbbrevDecl->hasChildren() ? '*' : ' ');

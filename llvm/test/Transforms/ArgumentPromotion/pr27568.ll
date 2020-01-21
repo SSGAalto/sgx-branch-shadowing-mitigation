@@ -1,6 +1,5 @@
 ; RUN: opt -S -argpromotion < %s | FileCheck %s
 ; RUN: opt -S -passes=argpromotion < %s | FileCheck %s
-; RUN: opt -S -debugify -o /dev/null < %s
 target triple = "x86_64-pc-windows-msvc"
 
 define internal void @callee(i8*) {

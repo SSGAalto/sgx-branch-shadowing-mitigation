@@ -22,7 +22,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Transforms/IPO/SampleProfile.h"
+#include "llvm/Transforms/SampleProfile.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -85,7 +85,7 @@
 
 using namespace llvm;
 using namespace sampleprof;
-using ProfileCount = Function::ProfileCount;
+
 #define DEBUG_TYPE "sample-profile"
 
 // Command line option to specify the file to read samples from. This is
@@ -217,6 +217,7 @@ protected:
   void buildEdges(Function &F);
   bool propagateThroughEdges(Function &F, bool UpdateBlockCount);
   void computeDominanceAndLoopInfo(Function &F);
+  unsigned getOffset(const DILocation *DIL) const;
   void clearFunctionData();
 
   /// \brief Map basic blocks to their computed weights.
@@ -472,6 +473,13 @@ void SampleProfileLoader::clearFunctionData() {
   CoverageTracker.clear();
 }
 
+/// Returns the line offset to the start line of the subprogram.
+/// We assume that a single function will not exceed 65535 LOC.
+unsigned SampleProfileLoader::getOffset(const DILocation *DIL) const {
+  return (DIL->getLine() - DIL->getScope()->getSubprogram()->getLine()) &
+         0xffff;
+}
+
 #ifndef NDEBUG
 /// \brief Print the weight of edge \p E on stream \p OS.
 ///
@@ -541,7 +549,7 @@ ErrorOr<uint64_t> SampleProfileLoader::getInstWeight(const Instruction &Inst) {
     return 0;
 
   const DILocation *DIL = DLoc;
-  uint32_t LineOffset = FunctionSamples::getOffset(DIL);
+  uint32_t LineOffset = getOffset(DIL);
   uint32_t Discriminator = DIL->getBaseDiscriminator();
   ErrorOr<uint64_t> R = FS->findSamplesAt(LineOffset, Discriminator);
   if (R) {
@@ -641,9 +649,8 @@ SampleProfileLoader::findCalleeFunctionSamples(const Instruction &Inst) const {
   if (FS == nullptr)
     return nullptr;
 
-  return FS->findFunctionSamplesAt(LineLocation(FunctionSamples::getOffset(DIL),
-                                                DIL->getBaseDiscriminator()),
-                                   CalleeName);
+  return FS->findFunctionSamplesAt(
+      LineLocation(getOffset(DIL), DIL->getBaseDiscriminator()), CalleeName);
 }
 
 /// Returns a vector of FunctionSamples that are the indirect call targets
@@ -663,7 +670,7 @@ SampleProfileLoader::findIndirectCallFunctionSamples(
   if (FS == nullptr)
     return R;
 
-  uint32_t LineOffset = FunctionSamples::getOffset(DIL);
+  uint32_t LineOffset = getOffset(DIL);
   uint32_t Discriminator = DIL->getBaseDiscriminator();
 
   auto T = FS->findCallTargetMapAt(LineOffset, Discriminator);
@@ -671,8 +678,8 @@ SampleProfileLoader::findIndirectCallFunctionSamples(
   if (T)
     for (const auto &T_C : T.get())
       Sum += T_C.second;
-  if (const FunctionSamplesMap *M = FS->findFunctionSamplesMapAt(LineLocation(
-          FunctionSamples::getOffset(DIL), DIL->getBaseDiscriminator()))) {
+  if (const FunctionSamplesMap *M = FS->findFunctionSamplesMapAt(
+          LineLocation(getOffset(DIL), DIL->getBaseDiscriminator()))) {
     if (M->empty())
       return R;
     for (const auto &NameFS : *M) {
@@ -703,7 +710,20 @@ SampleProfileLoader::findFunctionSamples(const Instruction &Inst) const {
   if (!DIL)
     return Samples;
 
-  return Samples->findFunctionSamples(DIL);
+  const DILocation *PrevDIL = DIL;
+  for (DIL = DIL->getInlinedAt(); DIL; DIL = DIL->getInlinedAt()) {
+    S.push_back(std::make_pair(
+        LineLocation(getOffset(DIL), DIL->getBaseDiscriminator()),
+        PrevDIL->getScope()->getSubprogram()->getLinkageName()));
+    PrevDIL = DIL;
+  }
+  if (S.size() == 0)
+    return Samples;
+  const FunctionSamples *FS = Samples;
+  for (int i = S.size() - 1; i >= 0 && FS != nullptr; i--) {
+    FS = FS->findFunctionSamplesAt(S[i].first, S[i].second);
+  }
+  return FS;
 }
 
 bool SampleProfileLoader::inlineCallInstruction(Instruction *I) {
@@ -1261,7 +1281,7 @@ void SampleProfileLoader::propagateWeights(Function &F) {
           if (!DLoc)
             continue;
           const DILocation *DIL = DLoc;
-          uint32_t LineOffset = FunctionSamples::getOffset(DIL);
+          uint32_t LineOffset = getOffset(DIL);
           uint32_t Discriminator = DIL->getBaseDiscriminator();
 
           const FunctionSamples *FS = findFunctionSamples(I);
@@ -1447,9 +1467,7 @@ bool SampleProfileLoader::emitAnnotations(Function &F) {
     // Sets the GUIDs that are inlined in the profiled binary. This is used
     // for ThinLink to make correct liveness analysis, and also make the IR
     // match the profiled binary before annotation.
-    F.setEntryCount(
-        ProfileCount(Samples->getHeadSamples() + 1, Function::PCT_Real),
-        &InlinedGUIDs);
+    F.setEntryCount(Samples->getHeadSamples() + 1, &InlinedGUIDs);
 
     // Compute dominance and loop info needed for propagation.
     computeDominanceAndLoopInfo(F);
@@ -1569,7 +1587,7 @@ bool SampleProfileLoader::runOnFunction(Function &F, ModuleAnalysisManager *AM) 
   // Initialize the entry count to -1, which will be treated conservatively
   // by getEntryCount as the same as unknown (None). If we have samples this
   // will be overwritten in emitAnnotations.
-  F.setEntryCount(ProfileCount(-1, Function::PCT_Real));
+  F.setEntryCount(-1);
   std::unique_ptr<OptimizationRemarkEmitter> OwnedORE;
   if (AM) {
     auto &FAM =

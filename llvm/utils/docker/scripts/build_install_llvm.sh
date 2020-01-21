@@ -16,8 +16,8 @@ Usage: build_install_llvm.sh [options] -- [cmake-args]
 
 Checkout svn sources and run cmake with the specified arguments. Used
 inside docker container.
-Passes additional -DCMAKE_INSTALL_PREFIX and puts the build results into
-/tmp/clang-install/ directory.
+Passes additional -DCMAKE_INSTALL_PREFIX and archives the contents of
+the directory to /tmp/clang.tar.gz.
 
 Available options:
   -h|--help           show this help message
@@ -103,7 +103,7 @@ while [[ $# -gt 0 ]]; do
 
       if [ "$PROJ" == "clang-tools-extra" ]; then
         if [ $CLANG_TOOLS_EXTRA_ENABLED -ne 0 ]; then
-          echo "Project 'clang-tools-extra' is already enabled, ignoring extra occurrences."
+          echo "Project 'clang-tools-extra' is already enabled, ignoring extra occurences."
         else
           CLANG_TOOLS_EXTRA_ENABLED=1
         fi
@@ -114,7 +114,7 @@ while [[ $# -gt 0 ]]; do
       if ! contains_project "$PROJ" ; then
         append_project "$PROJ"
       else
-        echo "Project '$PROJ' is already enabled, ignoring extra occurrences."
+        echo "Project '$PROJ' is already enabled, ignoring extra occurences."
       fi
       ;;
     -i|--install-target)
@@ -244,7 +244,12 @@ ninja $CMAKE_INSTALL_TARGETS
 
 popd
 
+# Pack the installed clang into an archive.
+echo "Archiving clang installation to /tmp/clang.tar.gz"
+cd "$CLANG_INSTALL_DIR"
+tar -czf /tmp/clang.tar.gz *
+
 # Cleanup.
-rm -rf "$CLANG_BUILD_DIR"
+rm -rf "$CLANG_BUILD_DIR" "$CLANG_INSTALL_DIR"
 
 echo "Done"

@@ -19,6 +19,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
+#include "llvm/CodeGen/MachineValueType.h"
 #include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/CallSite.h"
@@ -27,7 +28,6 @@
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/IntrinsicInst.h"
-#include "llvm/Support/MachineValueType.h"
 #include <algorithm>
 #include <cstdint>
 #include <utility>
@@ -241,11 +241,8 @@ public:
   }
 
   /// \brief Set the current block to which generated machine instructions will
-  /// be appended.
+  /// be appended, and clear the local CSE map.
   void startNewBlock();
-
-  /// Flush the local value map and sink local values if possible.
-  void finishBasicBlock();
 
   /// \brief Return current debug location information.
   DebugLoc getCurDebugLoc() const { return DbgLoc; }
@@ -562,19 +559,6 @@ private:
 
   /// \brief Removes dead local value instructions after SavedLastLocalvalue.
   void removeDeadLocalValueCode(MachineInstr *SavedLastLocalValue);
-
-  struct InstOrderMap {
-    DenseMap<MachineInstr *, unsigned> Orders;
-    MachineInstr *FirstTerminator = nullptr;
-    unsigned FirstTerminatorOrder = std::numeric_limits<unsigned>::max();
-
-    void initialize(MachineBasicBlock *MBB);
-  };
-
-  /// Sinks the local value materialization instruction LocalMI to its first use
-  /// in the basic block, or deletes it if it is not used.
-  void sinkLocalValueMaterialization(MachineInstr &LocalMI, unsigned DefReg,
-                                     InstOrderMap &OrderMap);
 
   /// \brief Insertion point before trying to select the current instruction.
   MachineBasicBlock::iterator SavedInsertPt;

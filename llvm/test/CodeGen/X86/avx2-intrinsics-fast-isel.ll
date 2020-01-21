@@ -355,7 +355,7 @@ define <4 x double> @test_mm256_broadcastsd_pd(<4 x double> %a0) {
 define <4 x i64> @test_mm256_broadcastsi128_si256(<2 x i64> %a0) {
 ; CHECK-LABEL: test_mm256_broadcastsi128_si256:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    # kill: def $xmm0 killed $xmm0 def $ymm0
+; CHECK-NEXT:    # kill: def %xmm0 killed %xmm0 def %ymm0
 ; CHECK-NEXT:    vinsertf128 $1, %xmm0, %ymm0, %ymm0
 ; CHECK-NEXT:    ret{{[l|q]}}
   %res = shufflevector <2 x i64> %a0, <2 x i64> undef, <4 x i32> <i32 0, i32 1, i32 0, i32 1>
@@ -1447,7 +1447,7 @@ define <4 x float> @test_mm256_mask_i64gather_ps(<4 x float> %a0, float *%a1, <4
 define <4 x i64> @test0_mm256_inserti128_si256(<4 x i64> %a0, <2 x i64> %a1) nounwind {
 ; CHECK-LABEL: test0_mm256_inserti128_si256:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    # kill: def $xmm1 killed $xmm1 def $ymm1
+; CHECK-NEXT:    # kill: def %xmm1 killed %xmm1 def %ymm1
 ; CHECK-NEXT:    vblendps {{.*#+}} ymm0 = ymm1[0,1,2,3],ymm0[4,5,6,7]
 ; CHECK-NEXT:    ret{{[l|q]}}
   %ext = shufflevector <2 x i64> %a1, <2 x i64> %a1, <4 x i32> <i32 0, i32 1, i32 undef, i32 undef>
@@ -1823,21 +1823,11 @@ declare <16 x i16> @llvm.x86.avx2.mpsadbw(<32 x i8>, <32 x i8>, i8) nounwind rea
 define <4 x i64> @test_mm256_mul_epi32(<4 x i64> %a0, <4 x i64> %a1) {
 ; CHECK-LABEL: test_mm256_mul_epi32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vpsllq $32, %ymm0, %ymm0
-; CHECK-NEXT:    vpsrad $31, %ymm0, %ymm2
-; CHECK-NEXT:    vpshufd {{.*#+}} ymm0 = ymm0[1,1,3,3,5,5,7,7]
-; CHECK-NEXT:    vpblendd {{.*#+}} ymm0 = ymm0[0],ymm2[1],ymm0[2],ymm2[3],ymm0[4],ymm2[5],ymm0[6],ymm2[7]
-; CHECK-NEXT:    vpsllq $32, %ymm1, %ymm1
-; CHECK-NEXT:    vpsrad $31, %ymm1, %ymm2
-; CHECK-NEXT:    vpshufd {{.*#+}} ymm1 = ymm1[1,1,3,3,5,5,7,7]
-; CHECK-NEXT:    vpblendd {{.*#+}} ymm1 = ymm1[0],ymm2[1],ymm1[2],ymm2[3],ymm1[4],ymm2[5],ymm1[6],ymm2[7]
 ; CHECK-NEXT:    vpmuldq %ymm1, %ymm0, %ymm0
 ; CHECK-NEXT:    ret{{[l|q]}}
-  %A = shl <4 x i64> %a0, <i64 32, i64 32, i64 32, i64 32>
-  %A1 = ashr exact <4 x i64> %A, <i64 32, i64 32, i64 32, i64 32>
-  %B = shl <4 x i64> %a1, <i64 32, i64 32, i64 32, i64 32>
-  %B1 = ashr exact <4 x i64> %B, <i64 32, i64 32, i64 32, i64 32>
-  %res = mul nsw <4 x i64> %A1, %B1
+  %arg0 = bitcast <4 x i64> %a0 to <8 x i32>
+  %arg1 = bitcast <4 x i64> %a1 to <8 x i32>
+  %res = call <4 x i64> @llvm.x86.avx2.pmul.dq(<8 x i32> %arg0, <8 x i32> %arg1)
   ret <4 x i64> %res
 }
 declare <4 x i64> @llvm.x86.avx2.pmul.dq(<8 x i32>, <8 x i32>) nounwind readnone
@@ -1845,14 +1835,11 @@ declare <4 x i64> @llvm.x86.avx2.pmul.dq(<8 x i32>, <8 x i32>) nounwind readnone
 define <4 x i64> @test_mm256_mul_epu32(<4 x i64> %a0, <4 x i64> %a1) {
 ; CHECK-LABEL: test_mm256_mul_epu32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vpxor %xmm2, %xmm2, %xmm2
-; CHECK-NEXT:    vpblendd {{.*#+}} ymm0 = ymm0[0],ymm2[1],ymm0[2],ymm2[3],ymm0[4],ymm2[5],ymm0[6],ymm2[7]
-; CHECK-NEXT:    vpblendd {{.*#+}} ymm1 = ymm1[0],ymm2[1],ymm1[2],ymm2[3],ymm1[4],ymm2[5],ymm1[6],ymm2[7]
 ; CHECK-NEXT:    vpmuludq %ymm1, %ymm0, %ymm0
 ; CHECK-NEXT:    ret{{[l|q]}}
-  %A = and <4 x i64> %a0, <i64 4294967295, i64 4294967295, i64 4294967295, i64 4294967295>
-  %B = and <4 x i64> %a1, <i64 4294967295, i64 4294967295, i64 4294967295, i64 4294967295>
-  %res = mul nuw <4 x i64> %A, %B
+  %arg0 = bitcast <4 x i64> %a0 to <8 x i32>
+  %arg1 = bitcast <4 x i64> %a1 to <8 x i32>
+  %res = call <4 x i64> @llvm.x86.avx2.pmulu.dq(<8 x i32> %arg0, <8 x i32> %arg1)
   ret <4 x i64> %res
 }
 declare <4 x i64> @llvm.x86.avx2.pmulu.dq(<8 x i32>, <8 x i32>) nounwind readnone

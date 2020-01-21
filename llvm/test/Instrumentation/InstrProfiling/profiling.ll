@@ -3,8 +3,6 @@
 
 target triple = "x86_64-apple-macosx10.10.0"
 
-; CHECK: @__llvm_profile_runtime = external global i32
-
 @__profn_foo = hidden constant [3 x i8] c"foo"
 ; CHECK-NOT: __profn_foo
 @__profn_bar = hidden constant [4 x i8] c"bar\00"
@@ -37,4 +35,5 @@ define void @baz() {
 
 declare void @llvm.instrprof.increment(i8*, i64, i32, i32)
 
+; CHECK: @__llvm_profile_runtime = external global i32
 ; CHECK: @llvm.used = appending global {{.*}} @__profd_foo {{.*}} @__profd_bar {{.*}} @__profd_baz {{.*}} section "llvm.metadata"

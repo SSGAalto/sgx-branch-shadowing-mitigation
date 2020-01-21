@@ -58,9 +58,6 @@ public:
 } // end anonymous namespace
 
 char WebAssemblyOptimizeLiveIntervals::ID = 0;
-INITIALIZE_PASS(WebAssemblyOptimizeLiveIntervals, DEBUG_TYPE,
-                "Optimize LiveIntervals for WebAssembly", false, false)
-
 FunctionPass *llvm::createWebAssemblyOptimizeLiveIntervals() {
   return new WebAssemblyOptimizeLiveIntervals();
 }

@@ -36,6 +36,9 @@
 #ifdef _MSC_VER
  #pragma comment(lib, "psapi.lib")
 #elif __MINGW32__
+ #if (HAVE_LIBPSAPI != 1)
+  #error "libpsapi.a should be present"
+ #endif
  // The version of g++ that comes with MinGW does *not* properly understand
  // the ll format specifier for printf. However, MinGW passes the format
  // specifiers on to the MSVCRT entirely, and the CRT understands the ll
@@ -500,7 +503,7 @@ void sys::DisableSystemDialogsOnCrash() {
   _set_error_mode(_OUT_TO_STDERR);
 }
 
-/// PrintStackTraceOnErrorSignal - When an error signal (such as SIGABRT or
+/// PrintStackTraceOnErrorSignal - When an error signal (such as SIBABRT or
 /// SIGSEGV) is delivered to the process, print a stack trace and then exit.
 void sys::PrintStackTraceOnErrorSignal(StringRef Argv0,
                                        bool DisableCrashReporting) {

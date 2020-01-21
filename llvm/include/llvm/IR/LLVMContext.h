@@ -31,7 +31,7 @@ class Function;
 class Instruction;
 class LLVMContextImpl;
 class Module;
-class OptPassGate;
+class OptBisect;
 template <typename T> class SmallVectorImpl;
 class SMDiagnostic;
 class StringRef;
@@ -76,7 +76,7 @@ public:
 
   // Pinned metadata names, which always have the same value.  This is a
   // compile-time performance optimization, not a correctness optimization.
-  enum : unsigned {
+  enum {
     MD_dbg = 0,                       // "dbg"
     MD_tbaa = 1,                      // "tbaa"
     MD_prof = 2,                      // "prof"
@@ -108,7 +108,7 @@ public:
   /// operand bundle tags that LLVM has special knowledge of are listed here.
   /// Additionally, this scheme allows LLVM to efficiently check for specific
   /// operand bundle tags without comparing strings.
-  enum : unsigned {
+  enum {
     OB_deopt = 0,         // "deopt"
     OB_funclet = 1,       // "funclet"
     OB_gc_transition = 2, // "gc-transition"
@@ -315,17 +315,9 @@ public:
     return OptionRegistry::instance().template get<ValT, Base, Mem>();
   }
 
-  /// \brief Access the object which can disable optional passes and individual
-  /// optimizations at compile time.
-  OptPassGate &getOptPassGate() const;
-
-  /// \brief Set the object which can disable optional passes and individual
-  /// optimizations at compile time.
-  ///
-  /// The lifetime of the object must be guaranteed to extend as long as the
-  /// LLVMContext is used by compilation.
-  void setOptPassGate(OptPassGate&);
-
+  /// \brief Access the object which manages optimization bisection for failure
+  /// analysis.
+  OptBisect &getOptBisect();
 private:
   // Module needs access to the add/removeModule methods.
   friend class Module;

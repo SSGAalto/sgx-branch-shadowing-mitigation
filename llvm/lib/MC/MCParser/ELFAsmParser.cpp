@@ -608,8 +608,6 @@ EndStmt:
       Type = ELF::SHT_X86_64_UNWIND;
     else if (TypeName == "llvm_odrtab")
       Type = ELF::SHT_LLVM_ODRTAB;
-    else if (TypeName == "llvm_linker_options")
-      Type = ELF::SHT_LLVM_LINKER_OPTIONS;
     else if (TypeName.getAsInteger(0, Type))
       return TokError("unknown section type");
   }
@@ -769,8 +767,12 @@ bool ELFAsmParser::ParseDirectiveSymver(StringRef, SMLoc) {
   if (AliasName.find('@') == StringRef::npos)
     return TokError("expected a '@' in the name");
 
+  MCSymbol *Alias = getContext().getOrCreateSymbol(AliasName);
   MCSymbol *Sym = getContext().getOrCreateSymbol(Name);
-  getStreamer().emitELFSymverDirective(AliasName, Sym);
+  const MCExpr *Value = MCSymbolRefExpr::create(Sym, getContext());
+
+  getStreamer().EmitAssignment(Alias, Value);
+  getStreamer().emitELFSymverDirective(Alias, Sym);
   return false;
 }
 

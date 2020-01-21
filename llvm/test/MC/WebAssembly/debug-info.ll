@@ -1,6 +1,4 @@
-; RUN: llc -filetype=obj %s -o - | llvm-readobj -r -s -expand-relocs
-
-target triple = "wasm32-unknown-unknown-wasm"
+; RUN: llc -mtriple wasm32-unknown-unknown-wasm -filetype=obj %s -o - | llvm-readobj -r -s -expand-relocs
 
 ; Debug information is currently not supported.  This test simply verifies that
 ; a valid object generated.

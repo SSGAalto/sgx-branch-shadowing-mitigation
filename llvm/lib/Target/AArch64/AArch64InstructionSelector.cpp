@@ -92,8 +92,6 @@ private:
     return selectAddrModeIndexed(Root, Width / 8);
   }
 
-  void renderTruncImm(MachineInstrBuilder &MIB, const MachineInstr &MI) const;
-
   const AArch64TargetMachine &TM;
   const AArch64Subtarget &STI;
   const AArch64InstrInfo &TII;
@@ -614,11 +612,11 @@ bool AArch64InstructionSelector::selectCompareBranch(
   else
     return false;
 
-  BuildMI(*I.getParent(), I, I.getDebugLoc(), TII.get(CBOpc))
-      .addUse(LHS)
-      .addMBB(DestMBB)
-      .constrainAllUses(TII, TRI, RBI);
+  auto MIB = BuildMI(*I.getParent(), I, I.getDebugLoc(), TII.get(CBOpc))
+                 .addUse(LHS)
+                 .addMBB(DestMBB);
 
+  constrainSelectedInstRegOperands(*MIB.getInstr(), TII, TRI, RBI);
   I.eraseFromParent();
   return true;
 }
@@ -875,6 +873,7 @@ bool AArch64InstructionSelector::select(MachineInstr &I,
     LLT SrcTy = MRI.getType(I.getOperand(2).getReg());
     LLT DstTy = MRI.getType(I.getOperand(0).getReg());
     unsigned DstSize = DstTy.getSizeInBits();
+    (void)DstSize;
     // Larger inserts are vectors, same-size ones should be something else by
     // now (split up or turned into COPYs).
     if (Ty.getSizeInBits() > 64 || SrcTy.getSizeInBits() > 32)
@@ -1468,12 +1467,6 @@ bool AArch64InstructionSelector::select(MachineInstr &I,
                                 : selectVaStartAAPCS(I, MF, MRI);
   case TargetOpcode::G_IMPLICIT_DEF:
     I.setDesc(TII.get(TargetOpcode::IMPLICIT_DEF));
-    const LLT DstTy = MRI.getType(I.getOperand(0).getReg());
-    const unsigned DstReg = I.getOperand(0).getReg();
-    const RegisterBank &DstRB = *RBI.getRegBank(DstReg, MRI, TRI);
-    const TargetRegisterClass *DstRC =
-        getRegClassForTypeOnBank(DstTy, DstRB, RBI);
-    RBI.constrainGenericRegister(DstReg, *DstRC, MRI);
     return true;
   }
 
@@ -1629,15 +1622,6 @@ AArch64InstructionSelector::selectAddrModeIndexed(MachineOperand &Root,
       [=](MachineInstrBuilder &MIB) { MIB.add(Root); },
       [=](MachineInstrBuilder &MIB) { MIB.addImm(0); },
   }};
-}
-
-void AArch64InstructionSelector::renderTruncImm(MachineInstrBuilder &MIB,
-                                                const MachineInstr &MI) const {
-  const MachineRegisterInfo &MRI = MI.getParent()->getParent()->getRegInfo();
-  assert(MI.getOpcode() == TargetOpcode::G_CONSTANT && "Expected G_CONSTANT");
-  Optional<int64_t> CstVal = getConstantVRegVal(MI.getOperand(0).getReg(), MRI);
-  assert(CstVal && "Expected constant value");
-  MIB.addImm(CstVal.getValue());
 }
 
 namespace llvm {

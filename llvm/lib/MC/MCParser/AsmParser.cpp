@@ -50,7 +50,6 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/MD5.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SMLoc.h"
@@ -167,6 +166,14 @@ private:
 
   /// \brief List of forward directional labels for diagnosis at the end.
   SmallVector<std::tuple<SMLoc, CppHashInfoTy, MCSymbol *>, 4> DirLabels;
+
+  /// When generating dwarf for assembly source files we need to calculate the
+  /// logical line number based on the last parsed cpp hash file line comment
+  /// and current line. Since this is slow and messes up the SourceMgr's
+  /// cache we save the last info we queried with SrcMgr.FindLineNumber().
+  SMLoc LastQueryIDLoc;
+  unsigned LastQueryBuffer;
+  unsigned LastQueryLine;
 
   /// AssemblerDialect. ~OU means unset value and use value provided by MAI.
   unsigned AssemblerDialect = ~0U;
@@ -302,11 +309,6 @@ private:
     SrcMgr.PrintMessage(Loc, Kind, Msg, Ranges);
   }
   static void DiagHandler(const SMDiagnostic &Diag, void *Context);
-
-  /// Should we emit DWARF describing this assembler source?  (Returns false if
-  /// the source has .file directives, which means we don't want to generate
-  /// info describing the assembler source itself.)
-  bool enabledGenDwarfForAssembly();
 
   /// \brief Enter the specified file. This returns true on failure.
   bool enterIncludeFile(const std::string &Filename);
@@ -821,19 +823,6 @@ const AsmToken &AsmParser::Lex() {
   return *tok;
 }
 
-bool AsmParser::enabledGenDwarfForAssembly() {
-  // Check whether the user specified -g.
-  if (!getContext().getGenDwarfForAssembly())
-    return false;
-  // If we haven't encountered any .file directives (which would imply that
-  // the assembler source was produced with debug info already) then emit one
-  // describing the assembler source file itself.
-  if (getContext().getGenDwarfFileNumber() == 0)
-    getContext().setGenDwarfFileNumber(getStreamer().EmitDwarfFileDirective(
-        0, StringRef(), getContext().getMainFileName()));
-  return true;
-}
-
 bool AsmParser::Run(bool NoInitialTextSection, bool NoFinalize) {
   // Create the initial section, if requested.
   if (!NoInitialTextSection)
@@ -847,9 +836,7 @@ bool AsmParser::Run(bool NoInitialTextSection, bool NoFinalize) {
   SmallVector<AsmRewrite, 4> AsmStrRewrites;
 
   // If we are generating dwarf for assembly source files save the initial text
-  // section.  (Don't use enabledGenDwarfForAssembly() here, as we aren't
-  // emitting any actual debug info yet and haven't had a chance to parse any
-  // embedded .file directives.)
+  // section and generate a .file directive.
   if (getContext().getGenDwarfForAssembly()) {
     MCSection *Sec = getStreamer().getCurrentSectionOnly();
     if (!Sec->getBeginSymbol()) {
@@ -860,6 +847,8 @@ bool AsmParser::Run(bool NoInitialTextSection, bool NoFinalize) {
     bool InsertResult = getContext().addGenDwarfSection(Sec);
     assert(InsertResult && ".text section should not have debug info yet");
     (void)InsertResult;
+    getContext().setGenDwarfFileNumber(getStreamer().EmitDwarfFileDirective(
+        0, StringRef(), getContext().getMainFileName()));
   }
 
   // While we have input, parse each statement.
@@ -1794,7 +1783,7 @@ bool AsmParser::parseStatement(ParseStatementInfo &Info,
 
     // If we are generating dwarf for assembly source files then gather the
     // info to make a dwarf label entry for this label if needed.
-    if (enabledGenDwarfForAssembly())
+    if (getContext().getGenDwarfForAssembly())
       MCGenDwarfLabelEntry::Make(Sym, &getStreamer(), getSourceManager(),
                                  IDLoc);
 
@@ -2163,7 +2152,7 @@ bool AsmParser::parseStatement(ParseStatementInfo &Info,
 
   // If we are generating dwarf for the current section then generate a .loc
   // directive for the instruction.
-  if (!ParseHadError && enabledGenDwarfForAssembly() &&
+  if (!ParseHadError && getContext().getGenDwarfForAssembly() &&
       getContext().getGenDwarfSectionSyms().count(
           getStreamer().getCurrentSectionOnly())) {
     unsigned Line;
@@ -2181,8 +2170,20 @@ bool AsmParser::parseStatement(ParseStatementInfo &Info,
           0, StringRef(), CppHashInfo.Filename);
       getContext().setGenDwarfFileNumber(FileNumber);
 
-      unsigned CppHashLocLineNo =
-        SrcMgr.FindLineNumber(CppHashInfo.Loc, CppHashInfo.Buf);
+      // Since SrcMgr.FindLineNumber() is slow and messes up the SourceMgr's
+      // cache with the different Loc from the call above we save the last
+      // info we queried here with SrcMgr.FindLineNumber().
+      unsigned CppHashLocLineNo;
+      if (LastQueryIDLoc == CppHashInfo.Loc &&
+          LastQueryBuffer == CppHashInfo.Buf)
+        CppHashLocLineNo = LastQueryLine;
+      else {
+        CppHashLocLineNo =
+            SrcMgr.FindLineNumber(CppHashInfo.Loc, CppHashInfo.Buf);
+        LastQueryLine = CppHashLocLineNo;
+        LastQueryIDLoc = CppHashInfo.Loc;
+        LastQueryBuffer = CppHashInfo.Buf;
+      }
       Line = CppHashInfo.LineNumber - 1 + (Line - CppHashLocLineNo);
     }
 
@@ -3247,17 +3248,18 @@ bool AsmParser::parseDirectiveAlign(bool IsPow2, unsigned ValueSize) {
 }
 
 /// parseDirectiveFile
-/// ::= .file filename
-/// ::= .file number [directory] filename [md5 checksum] [source source-text]
+/// ::= .file [number] filename
+/// ::= .file number directory filename
 bool AsmParser::parseDirectiveFile(SMLoc DirectiveLoc) {
   // FIXME: I'm not sure what this is.
   int64_t FileNumber = -1;
+  SMLoc FileNumberLoc = getLexer().getLoc();
   if (getLexer().is(AsmToken::Integer)) {
     FileNumber = getTok().getIntVal();
     Lex();
 
-    if (FileNumber < 0)
-      return TokError("negative file number");
+    if (FileNumber < 1)
+      return TokError("file number less than one");
   }
 
   std::string Path = getTok().getString();
@@ -3283,68 +3285,20 @@ bool AsmParser::parseDirectiveFile(SMLoc DirectiveLoc) {
     Filename = Path;
   }
 
-  std::string Checksum;
-
-  Optional<StringRef> Source;
-  bool HasSource = false;
-  std::string SourceString;
-
-  while (!parseOptionalToken(AsmToken::EndOfStatement)) {
-    StringRef Keyword;
-    if (check(getTok().isNot(AsmToken::Identifier),
-              "unexpected token in '.file' directive") ||
-        parseIdentifier(Keyword))
-      return true;
-    if (Keyword == "md5") {
-      if (check(FileNumber == -1,
-                "MD5 checksum specified, but no file number") ||
-          check(getTok().isNot(AsmToken::String),
-                "unexpected token in '.file' directive") ||
-          parseEscapedString(Checksum) ||
-          check(Checksum.size() != 32, "invalid MD5 checksum specified"))
-        return true;
-    } else if (Keyword == "source") {
-      HasSource = true;
-      if (check(FileNumber == -1,
-                "source specified, but no file number") ||
-          check(getTok().isNot(AsmToken::String),
-                "unexpected token in '.file' directive") ||
-          parseEscapedString(SourceString))
-        return true;
-    } else {
-      return TokError("unexpected token in '.file' directive");
-    }
-  }
-
-  // In case there is a -g option as well as debug info from directive .file,
-  // we turn off the -g option, directly use the existing debug info instead.
-  getContext().setGenDwarfForAssembly(false);
+  if (parseToken(AsmToken::EndOfStatement,
+                 "unexpected token in '.file' directive"))
+    return true;
 
   if (FileNumber == -1)
     getStreamer().EmitFileDirective(Filename);
   else {
-    MD5::MD5Result *CKMem = nullptr;
-    if (!Checksum.empty()) {
-      Checksum = fromHex(Checksum);
-      if (check(Checksum.size() != 16, "invalid MD5 checksum specified"))
-        return true;
-      CKMem = (MD5::MD5Result *)Ctx.allocate(sizeof(MD5::MD5Result), 1);
-      memcpy(&CKMem->Bytes, Checksum.data(), 16);
-    }
-    if (HasSource) {
-      char *SourceBuf = static_cast<char *>(Ctx.allocate(SourceString.size()));
-      memcpy(SourceBuf, SourceString.data(), SourceString.size());
-      Source = StringRef(SourceBuf, SourceString.size());
-    }
-    if (FileNumber == 0)
-      getStreamer().emitDwarfFile0Directive(Directory, Filename, CKMem, Source);
-    else {
-      Expected<unsigned> FileNumOrErr = getStreamer().tryEmitDwarfFileDirective(
-          FileNumber, Directory, Filename, CKMem, Source);
-      if (!FileNumOrErr)
-        return Error(DirectiveLoc, toString(FileNumOrErr.takeError()));
-      FileNumber = FileNumOrErr.get();
-    }
+    // If there is -g option as well as debug info from directive file,
+    // we turn off -g option, directly use the existing debug info instead.
+    if (getContext().getGenDwarfForAssembly())
+      getContext().setGenDwarfForAssembly(false);
+    else if (getStreamer().EmitDwarfFileDirective(FileNumber, Directory, Filename) ==
+        0)
+      return Error(FileNumberLoc, "file number already allocated");
   }
 
   return false;
@@ -4257,10 +4211,7 @@ bool AsmParser::parseDirectiveMacro(SMLoc DirectiveLoc) {
   const char *BodyEnd = EndToken.getLoc().getPointer();
   StringRef Body = StringRef(BodyStart, BodyEnd - BodyStart);
   checkForBadMacro(DirectiveLoc, Name, Body, Parameters);
-  MCAsmMacro Macro(Name, Body, std::move(Parameters));
-  DEBUG_WITH_TYPE("asm-macros", dbgs() << "Defining new macro:\n";
-                  Macro.dump());
-  getContext().defineMacro(Name, std::move(Macro));
+  getContext().defineMacro(Name, MCAsmMacro(Name, Body, std::move(Parameters)));
   return false;
 }
 
@@ -4423,8 +4374,6 @@ bool AsmParser::parseDirectivePurgeMacro(SMLoc DirectiveLoc) {
     return Error(DirectiveLoc, "macro '" + Name + "' is not defined");
 
   getContext().undefineMacro(Name);
-  DEBUG_WITH_TYPE("asm-macros", dbgs()
-                                    << "Un-defining macro: " << Name << "\n");
   return false;
 }
 

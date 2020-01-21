@@ -195,7 +195,7 @@ static void predictValueUseListOrderImpl(const Value *V, const Function *F,
       !isa<GlobalVariable>(V) && !isa<Function>(V) && !isa<BasicBlock>(V);
   if (auto *BA = dyn_cast<BlockAddress>(V))
     ID = OM.lookup(BA->getBasicBlock()).first;
-  llvm::sort(List.begin(), List.end(), [&](const Entry &L, const Entry &R) {
+  std::sort(List.begin(), List.end(), [&](const Entry &L, const Entry &R) {
     const Use *LU = L.first;
     const Use *RU = R.first;
     if (LU == RU)
@@ -383,6 +383,16 @@ static void PrintCallingConv(unsigned cc, raw_ostream &Out) {
   }
 }
 
+void llvm::PrintEscapedString(StringRef Name, raw_ostream &Out) {
+  for (unsigned i = 0, e = Name.size(); i != e; ++i) {
+    unsigned char C = Name[i];
+    if (isprint(C) && C != '\\' && C != '"')
+      Out << C;
+    else
+      Out << '\\' << hexdigit(C >> 4) << hexdigit(C & 0x0F);
+  }
+}
+
 enum PrefixType {
   GlobalPrefix,
   ComdatPrefix,
@@ -458,73 +468,27 @@ namespace {
 
 class TypePrinting {
 public:
-  TypePrinting(const Module *M = nullptr) : DeferredM(M) {}
+  /// NamedTypes - The named types that are used by the current module.
+  TypeFinder NamedTypes;
 
+  /// NumberedTypes - The numbered types, along with their value.
+  DenseMap<StructType*, unsigned> NumberedTypes;
+
+  TypePrinting() = default;
   TypePrinting(const TypePrinting &) = delete;
   TypePrinting &operator=(const TypePrinting &) = delete;
 
-  /// The named types that are used by the current module.
-  TypeFinder &getNamedTypes();
-
-  /// The numbered types, number to type mapping.
-  std::vector<StructType *> &getNumberedTypes();
-
-  bool empty();
+  void incorporateTypes(const Module &M);
 
   void print(Type *Ty, raw_ostream &OS);
 
   void printStructBody(StructType *Ty, raw_ostream &OS);
-
-private:
-  void incorporateTypes();
-
-  /// A module to process lazily when needed. Set to nullptr as soon as used.
-  const Module *DeferredM;
-
-  TypeFinder NamedTypes;
-
-  // The numbered types, along with their value.
-  DenseMap<StructType *, unsigned> Type2Number;
-
-  std::vector<StructType *> NumberedTypes;
 };
 
 } // end anonymous namespace
 
-TypeFinder &TypePrinting::getNamedTypes() {
-  incorporateTypes();
-  return NamedTypes;
-}
-
-std::vector<StructType *> &TypePrinting::getNumberedTypes() {
-  incorporateTypes();
-
-  // We know all the numbers that each type is used and we know that it is a
-  // dense assignment. Convert the map to an index table, if it's not done
-  // already (judging from the sizes):
-  if (NumberedTypes.size() == Type2Number.size())
-    return NumberedTypes;
-
-  NumberedTypes.resize(Type2Number.size());
-  for (const auto &P : Type2Number) {
-    assert(P.second < NumberedTypes.size() && "Didn't get a dense numbering?");
-    assert(!NumberedTypes[P.second] && "Didn't get a unique numbering?");
-    NumberedTypes[P.second] = P.first;
-  }
-  return NumberedTypes;
-}
-
-bool TypePrinting::empty() {
-  incorporateTypes();
-  return NamedTypes.empty() && Type2Number.empty();
-}
-
-void TypePrinting::incorporateTypes() {
-  if (!DeferredM)
-    return;
-
-  NamedTypes.run(*DeferredM, false);
-  DeferredM = nullptr;
+void TypePrinting::incorporateTypes(const Module &M) {
+  NamedTypes.run(M, false);
 
   // The list of struct types we got back includes all the struct types, split
   // the unnamed ones out to a numbering and remove the anonymous structs.
@@ -539,7 +503,7 @@ void TypePrinting::incorporateTypes() {
       continue;
 
     if (STy->getName().empty())
-      Type2Number[STy] = NextNumber++;
+      NumberedTypes[STy] = NextNumber++;
     else
       *NextToUse++ = STy;
   }
@@ -547,8 +511,9 @@ void TypePrinting::incorporateTypes() {
   NamedTypes.erase(NextToUse, NamedTypes.end());
 }
 
-/// Write the specified type to the specified raw_ostream, making use of type
-/// names or up references to shorten the type name where possible.
+
+/// CalcTypeName - Write the specified type to the specified raw_ostream, making
+/// use of type names or up references to shorten the type name where possible.
 void TypePrinting::print(Type *Ty, raw_ostream &OS) {
   switch (Ty->getTypeID()) {
   case Type::VoidTyID:      OS << "void"; return;
@@ -592,9 +557,8 @@ void TypePrinting::print(Type *Ty, raw_ostream &OS) {
     if (!STy->getName().empty())
       return PrintLLVMName(OS, STy->getName(), LocalPrefix);
 
-    incorporateTypes();
-    const auto I = Type2Number.find(STy);
-    if (I != Type2Number.end())
+    DenseMap<StructType*, unsigned>::iterator I = NumberedTypes.find(STy);
+    if (I != NumberedTypes.end())
       OS << '%' << I->second;
     else  // Not enumerated, print the hex address.
       OS << "%\"type " << STy << '\"';
@@ -1499,7 +1463,7 @@ struct MDFieldPrinter {
 
   void printTag(const DINode *N);
   void printMacinfoType(const DIMacroNode *N);
-  void printChecksum(const DIFile::ChecksumInfo<StringRef> &N);
+  void printChecksumKind(const DIFile *N);
   void printString(StringRef Name, StringRef Value,
                    bool ShouldSkipEmpty = true);
   void printMetadata(StringRef Name, const Metadata *MD,
@@ -1534,10 +1498,11 @@ void MDFieldPrinter::printMacinfoType(const DIMacroNode *N) {
     Out << N->getMacinfoType();
 }
 
-void MDFieldPrinter::printChecksum(
-    const DIFile::ChecksumInfo<StringRef> &Checksum) {
-  Out << FS << "checksumkind: " << Checksum.getKindAsString();
-  printString("checksum", Checksum.Value, /* ShouldSkipEmpty */ false);
+void MDFieldPrinter::printChecksumKind(const DIFile *N) {
+  if (N->getChecksumKind() == DIFile::CSK_None)
+    // Skip CSK_None checksum kind.
+    return;
+  Out << FS << "checksumkind: " << N->getChecksumKindAsString();
 }
 
 void MDFieldPrinter::printString(StringRef Name, StringRef Value,
@@ -1656,15 +1621,10 @@ static void writeDILocation(raw_ostream &Out, const DILocation *DL,
 }
 
 static void writeDISubrange(raw_ostream &Out, const DISubrange *N,
-                            TypePrinting *TypePrinter, SlotTracker *Machine,
-                            const Module *Context) {
+                            TypePrinting *, SlotTracker *, const Module *) {
   Out << "!DISubrange(";
-  MDFieldPrinter Printer(Out, TypePrinter, Machine, Context);
-  if (auto *CE = N->getCount().dyn_cast<ConstantInt*>())
-    Printer.printInt("count", CE->getSExtValue(), /* ShouldSkipZero */ false);
-  else
-    Printer.printMetadata("count", N->getCount().dyn_cast<DIVariable*>(),
-                          /*ShouldSkipNull */ false);
+  MDFieldPrinter Printer(Out);
+  Printer.printInt("count", N->getCount(), /* ShouldSkipZero */ false);
   Printer.printInt("lowerBound", N->getLowerBound());
   Out << ")";
 }
@@ -1674,13 +1634,7 @@ static void writeDIEnumerator(raw_ostream &Out, const DIEnumerator *N,
   Out << "!DIEnumerator(";
   MDFieldPrinter Printer(Out);
   Printer.printString("name", N->getName(), /* ShouldSkipEmpty */ false);
-  if (N->isUnsigned()) {
-    auto Value = static_cast<uint64_t>(N->getValue());
-    Printer.printInt("value", Value, /* ShouldSkipZero */ false);
-    Printer.printBool("isUnsigned", true);
-  } else {
-    Printer.printInt("value", N->getValue(), /* ShouldSkipZero */ false);
-  }
+  Printer.printInt("value", N->getValue(), /* ShouldSkipZero */ false);
   Out << ")";
 }
 
@@ -1742,7 +1696,6 @@ static void writeDICompositeType(raw_ostream &Out, const DICompositeType *N,
   Printer.printMetadata("vtableHolder", N->getRawVTableHolder());
   Printer.printMetadata("templateParams", N->getRawTemplateParams());
   Printer.printString("identifier", N->getIdentifier());
-  Printer.printMetadata("discriminator", N->getRawDiscriminator());
   Out << ")";
 }
 
@@ -1766,11 +1719,8 @@ static void writeDIFile(raw_ostream &Out, const DIFile *N, TypePrinting *,
                       /* ShouldSkipEmpty */ false);
   Printer.printString("directory", N->getDirectory(),
                       /* ShouldSkipEmpty */ false);
-  // Print all values for checksum together, or not at all.
-  if (N->getChecksum())
-    Printer.printChecksum(*N->getChecksum());
-  Printer.printString("source", N->getSource().getValueOr(StringRef()),
-                      /* ShouldSkipEmpty */ true);
+  Printer.printChecksumKind(N);
+  Printer.printString("checksum", N->getChecksum(), /* ShouldSkipEmpty */ true);
   Out << ")";
 }
 
@@ -2252,11 +2202,12 @@ private:
 AssemblyWriter::AssemblyWriter(formatted_raw_ostream &o, SlotTracker &Mac,
                                const Module *M, AssemblyAnnotationWriter *AAW,
                                bool IsForDebug, bool ShouldPreserveUseListOrder)
-    : Out(o), TheModule(M), Machine(Mac), TypePrinter(M), AnnotationWriter(AAW),
+    : Out(o), TheModule(M), Machine(Mac), AnnotationWriter(AAW),
       IsForDebug(IsForDebug),
       ShouldPreserveUseListOrder(ShouldPreserveUseListOrder) {
   if (!TheModule)
     return;
+  TypePrinter.incorporateTypes(*TheModule);
   for (const GlobalObject &GO : TheModule->global_objects())
     if (const Comdat *C = GO.getComdat())
       Comdats.insert(C);
@@ -2546,13 +2497,8 @@ static void PrintVisibility(GlobalValue::VisibilityTypes Vis,
   }
 }
 
-static void PrintDSOLocation(const GlobalValue &GV,
-                             formatted_raw_ostream &Out) {
-  // GVs with local linkage or non default visibility are implicitly dso_local,
-  // so we don't print it.
-  bool Implicit = GV.hasLocalLinkage() ||
-                  (!GV.hasExternalWeakLinkage() && !GV.hasDefaultVisibility());
-  if (GV.isDSOLocal() && !Implicit)
+static void PrintDSOLocation(bool IsDSOLocal, formatted_raw_ostream &Out){
+  if (IsDSOLocal)
     Out << "dso_local ";
 }
 
@@ -2626,7 +2572,7 @@ void AssemblyWriter::printGlobal(const GlobalVariable *GV) {
     Out << "external ";
 
   Out << getLinkagePrintName(GV->getLinkage());
-  PrintDSOLocation(*GV, Out);
+  PrintDSOLocation(GV->isDSOLocal(), Out);
   PrintVisibility(GV->getVisibility(), Out);
   PrintDLLStorageClass(GV->getDLLStorageClass(), Out);
   PrintThreadLocalModel(GV->getThreadLocalMode(), Out);
@@ -2673,7 +2619,7 @@ void AssemblyWriter::printIndirectSymbol(const GlobalIndirectSymbol *GIS) {
   Out << " = ";
 
   Out << getLinkagePrintName(GIS->getLinkage());
-  PrintDSOLocation(*GIS, Out);
+  PrintDSOLocation(GIS->isDSOLocal(), Out);
   PrintVisibility(GIS->getVisibility(), Out);
   PrintDLLStorageClass(GIS->getDLLStorageClass(), Out);
   PrintThreadLocalModel(GIS->getThreadLocalMode(), Out);
@@ -2710,30 +2656,39 @@ void AssemblyWriter::printComdat(const Comdat *C) {
 }
 
 void AssemblyWriter::printTypeIdentities() {
-  if (TypePrinter.empty())
+  if (TypePrinter.NumberedTypes.empty() &&
+      TypePrinter.NamedTypes.empty())
     return;
 
   Out << '\n';
 
+  // We know all the numbers that each type is used and we know that it is a
+  // dense assignment.  Convert the map to an index table.
+  std::vector<StructType*> NumberedTypes(TypePrinter.NumberedTypes.size());
+  for (DenseMap<StructType*, unsigned>::iterator I =
+       TypePrinter.NumberedTypes.begin(), E = TypePrinter.NumberedTypes.end();
+       I != E; ++I) {
+    assert(I->second < NumberedTypes.size() && "Didn't get a dense numbering?");
+    NumberedTypes[I->second] = I->first;
+  }
+
   // Emit all numbered types.
-  auto &NumberedTypes = TypePrinter.getNumberedTypes();
-  for (unsigned I = 0, E = NumberedTypes.size(); I != E; ++I) {
-    Out << '%' << I << " = type ";
+  for (unsigned i = 0, e = NumberedTypes.size(); i != e; ++i) {
+    Out << '%' << i << " = type ";
 
     // Make sure we print out at least one level of the type structure, so
     // that we do not get %2 = type %2
-    TypePrinter.printStructBody(NumberedTypes[I], Out);
+    TypePrinter.printStructBody(NumberedTypes[i], Out);
     Out << '\n';
   }
 
-  auto &NamedTypes = TypePrinter.getNamedTypes();
-  for (unsigned I = 0, E = NamedTypes.size(); I != E; ++I) {
-    PrintLLVMName(Out, NamedTypes[I]->getName(), LocalPrefix);
+  for (unsigned i = 0, e = TypePrinter.NamedTypes.size(); i != e; ++i) {
+    PrintLLVMName(Out, TypePrinter.NamedTypes[i]->getName(), LocalPrefix);
     Out << " = type ";
 
     // Make sure we print out at least one level of the type structure, so
     // that we do not get %FILE = type %FILE
-    TypePrinter.printStructBody(NamedTypes[I], Out);
+    TypePrinter.printStructBody(TypePrinter.NamedTypes[i], Out);
     Out << '\n';
   }
 }
@@ -2776,7 +2731,7 @@ void AssemblyWriter::printFunction(const Function *F) {
     Out << "define ";
 
   Out << getLinkagePrintName(F->getLinkage());
-  PrintDSOLocation(*F, Out);
+  PrintDSOLocation(F->isDSOLocal(), Out);
   PrintVisibility(F->getVisibility(), Out);
   PrintDLLStorageClass(F->getDLLStorageClass(), Out);
 
@@ -3603,7 +3558,9 @@ static bool printWithoutType(const Value &V, raw_ostream &O,
 
 static void printAsOperandImpl(const Value &V, raw_ostream &O, bool PrintType,
                                ModuleSlotTracker &MST) {
-  TypePrinting TypePrinter(MST.getModule());
+  TypePrinting TypePrinter;
+  if (const Module *M = MST.getModule())
+    TypePrinter.incorporateTypes(*M);
   if (PrintType) {
     TypePrinter.print(V.getType(), O);
     O << ' ';
@@ -3642,7 +3599,9 @@ static void printMetadataImpl(raw_ostream &ROS, const Metadata &MD,
                               bool OnlyAsOperand) {
   formatted_raw_ostream OS(ROS);
 
-  TypePrinting TypePrinter(M);
+  TypePrinting TypePrinter;
+  if (M)
+    TypePrinter.incorporateTypes(*M);
 
   WriteAsOperandInternal(OS, &MD, &TypePrinter, MST.getMachine(), M,
                          /* FromValue */ true);

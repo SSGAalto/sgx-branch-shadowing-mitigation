@@ -174,11 +174,6 @@ static bool isSimpleEnoughPointerToCommit(Constant *C) {
   return false;
 }
 
-static Constant *getInitializer(Constant *C) {
-  auto *GV = dyn_cast<GlobalVariable>(C);
-  return GV && GV->hasDefinitiveInitializer() ? GV->getInitializer() : nullptr;
-}
-
 /// Return the value that would be computed by a load from P after the stores
 /// reflected by 'memory' have been performed.  If we can't decide, return null.
 Constant *Evaluator::ComputeLoadResult(Constant *P) {
@@ -194,25 +189,14 @@ Constant *Evaluator::ComputeLoadResult(Constant *P) {
     return nullptr;
   }
 
-  if (ConstantExpr *CE = dyn_cast<ConstantExpr>(P)) {
-    switch (CE->getOpcode()) {
-    // Handle a constantexpr getelementptr.
-    case Instruction::GetElementPtr:
-      if (auto *I = getInitializer(CE->getOperand(0)))
-        return ConstantFoldLoadThroughGEPConstantExpr(I, CE);
-      break;
-    // Handle a constantexpr bitcast.
-    case Instruction::BitCast:
-      Constant *Val = getVal(CE->getOperand(0));
-      auto MM = MutatedMemory.find(Val);
-      auto *I = (MM != MutatedMemory.end()) ? MM->second
-                                            : getInitializer(CE->getOperand(0));
-      if (I)
-        return ConstantFoldLoadThroughBitcast(
-            I, P->getType()->getPointerElementType(), DL);
-      break;
+  // Handle a constantexpr getelementptr.
+  if (ConstantExpr *CE = dyn_cast<ConstantExpr>(P))
+    if (CE->getOpcode() == Instruction::GetElementPtr &&
+        isa<GlobalVariable>(CE->getOperand(0))) {
+      GlobalVariable *GV = cast<GlobalVariable>(CE->getOperand(0));
+      if (GV->hasDefinitiveInitializer())
+        return ConstantFoldLoadThroughGEPConstantExpr(GV->getInitializer(), CE);
     }
-  }
 
   return nullptr;  // don't know how to evaluate.
 }
@@ -268,8 +252,7 @@ bool Evaluator::EvaluateBlock(BasicBlock::iterator CurInst,
           // In order to push the bitcast onto the stored value, a bitcast
           // from NewTy to Val's type must be legal.  If it's not, we can try
           // introspecting NewTy to find a legal conversion.
-          Constant *NewVal;
-          while (!(NewVal = ConstantFoldLoadThroughBitcast(Val, NewTy, DL))) {
+          while (!Val->getType()->canLosslesslyBitCastTo(NewTy)) {
             // If NewTy is a struct, we can convert the pointer to the struct
             // into a pointer to its first member.
             // FIXME: This could be extended to support arrays as well.
@@ -293,7 +276,10 @@ bool Evaluator::EvaluateBlock(BasicBlock::iterator CurInst,
             }
           }
 
-          Val = NewVal;
+          // If we found compatible types, go ahead and push the bitcast
+          // onto the stored value.
+          Val = ConstantExpr::getBitCast(Val, NewTy);
+
           DEBUG(dbgs() << "Evaluated bitcast: " << *Val << "\n");
         }
       }

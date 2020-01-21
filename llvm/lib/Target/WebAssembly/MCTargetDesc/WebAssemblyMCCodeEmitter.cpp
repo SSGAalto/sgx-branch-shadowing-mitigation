@@ -23,11 +23,9 @@
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCSymbol.h"
-#include "llvm/Support/Debug.h"
 #include "llvm/Support/EndianStream.h"
 #include "llvm/Support/LEB128.h"
 #include "llvm/Support/raw_ostream.h"
-
 using namespace llvm;
 
 #define DEBUG_TYPE "mccodeemitter"
@@ -88,17 +86,14 @@ void WebAssemblyMCCodeEmitter::encodeInstruction(
         assert(Desc.TSFlags == 0 &&
                "WebAssembly non-variable_ops don't use TSFlags");
         const MCOperandInfo &Info = Desc.OpInfo[i];
-        DEBUG(dbgs() << "Encoding immediate: type=" << int(Info.OperandType) << "\n");
         if (Info.OperandType == WebAssembly::OPERAND_I32IMM) {
           encodeSLEB128(int32_t(MO.getImm()), OS);
-        } else if (Info.OperandType == WebAssembly::OPERAND_OFFSET32) {
-          encodeULEB128(uint32_t(MO.getImm()), OS);
         } else if (Info.OperandType == WebAssembly::OPERAND_I64IMM) {
           encodeSLEB128(int64_t(MO.getImm()), OS);
         } else if (Info.OperandType == WebAssembly::OPERAND_GLOBAL) {
           llvm_unreachable("wasm globals should only be accessed symbolicly");
         } else if (Info.OperandType == WebAssembly::OPERAND_SIGNATURE) {
-          OS << uint8_t(MO.getImm());
+          encodeSLEB128(int64_t(MO.getImm()), OS);
         } else {
           encodeULEB128(uint64_t(MO.getImm()), OS);
         }

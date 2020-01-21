@@ -30,24 +30,6 @@ def NotHasNontrappingFPToInt :
     Predicate<"!Subtarget->hasNontrappingFPToInt()">,
               AssemblerPredicate<"!FeatureNontrappingFPToInt",
                                  "nontrapping-fptoint">;
-def HasSignExt :
-    Predicate<"Subtarget->hasSignExt()">,
-              AssemblerPredicate<"FeatureSignExt",
-                                 "sign-ext">;
-def NotHasSignExt :
-    Predicate<"!Subtarget->hasSignExt()">,
-              AssemblerPredicate<"!FeatureSignExt",
-                                 "sign-ext">;
-
-def HasExceptionHandling :
-    Predicate<"Subtarget->hasExceptionHandling()">,
-              AssemblerPredicate<"FeatureExceptionHandling",
-                                 "exception-handling">;
-
-def NotHasExceptionHandling :
-    Predicate<"!Subtarget->hasExceptionHandling()">,
-              AssemblerPredicate<"!FeatureExceptionHandling",
-                                 "exception-handling">;
 
 //===----------------------------------------------------------------------===//
 // WebAssembly-specific DAG Node Types.
@@ -166,7 +148,6 @@ defm : ARGUMENT<I32>;
 defm : ARGUMENT<I64>;
 defm : ARGUMENT<F32>;
 defm : ARGUMENT<F64>;
-defm : ARGUMENT<EXCEPT_REF>;
 defm : SIMD_ARGUMENT<v16i8>;
 defm : SIMD_ARGUMENT<v8i16>;
 defm : SIMD_ARGUMENT<v4i32>;
@@ -233,7 +214,6 @@ defm : LOCAL<I64>;
 defm : LOCAL<F32>;
 defm : LOCAL<F64>;
 defm : LOCAL<V128>, Requires<[HasSIMD128]>;
-defm : LOCAL<EXCEPT_REF>, Requires<[HasExceptionHandling]>;
 
 let isMoveImm = 1, isAsCheapAsAMove = 1, isReMaterializable = 1 in {
 def CONST_I32 : I<(outs I32:$res), (ins i32imm_op:$imm),
@@ -269,4 +249,3 @@ include "WebAssemblyInstrConv.td"
 include "WebAssemblyInstrFloat.td"
 include "WebAssemblyInstrAtomics.td"
 include "WebAssemblyInstrSIMD.td"
-include "WebAssemblyInstrExceptRef.td"

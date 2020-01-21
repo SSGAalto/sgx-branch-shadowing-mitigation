@@ -77,12 +77,11 @@ protected:
   GlobalValue(Type *Ty, ValueTy VTy, Use *Ops, unsigned NumOps,
               LinkageTypes Linkage, const Twine &Name, unsigned AddressSpace)
       : Constant(PointerType::get(Ty, AddressSpace), VTy, Ops, NumOps),
-        ValueType(Ty), Visibility(DefaultVisibility),
+        ValueType(Ty), Linkage(Linkage), Visibility(DefaultVisibility),
         UnnamedAddrVal(unsigned(UnnamedAddr::None)),
         DllStorageClass(DefaultStorageClass), ThreadLocal(NotThreadLocal),
-        HasLLVMReservedName(false), IsDSOLocal(false), IntID((Intrinsic::ID)0U),
-        Parent(nullptr) {
-    setLinkage(Linkage);
+        HasLLVMReservedName(false), IsDSOLocal(false),
+        IntID((Intrinsic::ID)0U), Parent(nullptr) {
     setName(Name);
   }
 
@@ -111,12 +110,6 @@ protected:
 
 private:
   friend class Constant;
-
-  void maybeSetDsoLocal() {
-    if (hasLocalLinkage() ||
-        (!hasDefaultVisibility() && !hasExternalWeakLinkage()))
-      setDSOLocal(true);
-  }
 
   // Give subclasses access to what otherwise would be wasted padding.
   // (17 + 4 + 2 + 2 + 2 + 3 + 1 + 1) == 32.
@@ -239,7 +232,6 @@ public:
     assert((!hasLocalLinkage() || V == DefaultVisibility) &&
            "local linkage requires default visibility");
     Visibility = V;
-    maybeSetDsoLocal();
   }
 
   /// If the value is "Thread Local", its value isn't shared by the threads.
@@ -445,7 +437,6 @@ public:
     if (isLocalLinkage(LT))
       Visibility = DefaultVisibility;
     Linkage = LT;
-    maybeSetDsoLocal();
   }
   LinkageTypes getLinkage() const { return LinkageTypes(Linkage); }
 
@@ -572,13 +563,6 @@ public:
            V->getValueID() == Value::GlobalAliasVal ||
            V->getValueID() == Value::GlobalIFuncVal;
   }
-
-  /// True if GV can be left out of the object symbol table. This is the case
-  /// for linkonce_odr values whose address is not significant. While legal, it
-  /// is not normally profitable to omit them from the .o symbol table. Using
-  /// this analysis makes sense when the information can be passed down to the
-  /// linker or we are in LTO.
-  bool canBeOmittedFromSymbolTable() const;
 };
 
 } // end namespace llvm

@@ -389,8 +389,12 @@ public:
   /// FindExistingPHI - Look through the PHI nodes in a block to see if any of
   /// them match what is needed.
   void FindExistingPHI(BlkT *BB, BlockListTy *BlockList) {
-    for (auto &SomePHI : BB->phis()) {
-      if (CheckIfPHIMatches(&SomePHI)) {
+    for (typename BlkT::iterator BBI = BB->begin(), BBE = BB->end();
+         BBI != BBE; ++BBI) {
+      PhiT *SomePHI = Traits::InstrIsPHI(&*BBI);
+      if (!SomePHI)
+        break;
+      if (CheckIfPHIMatches(SomePHI)) {
         RecordMatchingPHIs(BlockList);
         break;
       }

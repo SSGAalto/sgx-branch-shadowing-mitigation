@@ -8,7 +8,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "AMDGPUBaseInfo.h"
-#include "AMDGPUTargetTransformInfo.h"
 #include "AMDGPU.h"
 #include "SIDefines.h"
 #include "llvm/ADT/StringRef.h"
@@ -157,28 +156,6 @@ int getMaskedMIMGOp(const MCInstrInfo &MII, unsigned Opc, unsigned NewChannels) 
   }
 }
 
-int getMaskedMIMGAtomicOp(const MCInstrInfo &MII, unsigned Opc, unsigned NewChannels) {
-  assert(AMDGPU::getNamedOperandIdx(Opc, AMDGPU::OpName::vdst) != -1);
-  assert(NewChannels == 1 || NewChannels == 2 || NewChannels == 4);
-
-  unsigned OrigChannels = rcToChannels(MII.get(Opc).OpInfo[0].RegClass);
-  assert(OrigChannels == 1 || OrigChannels == 2 || OrigChannels == 4);
-
-  if (NewChannels == OrigChannels) return Opc;
-
-  if (OrigChannels <= 2 && NewChannels <= 2) {
-    // This is an ordinary atomic (not an atomic_cmpswap)
-    return (OrigChannels == 1)?
-      AMDGPU::getMIMGAtomicOp1(Opc) : AMDGPU::getMIMGAtomicOp2(Opc);
-  } else if (OrigChannels >= 2 && NewChannels >= 2) {
-    // This is an atomic_cmpswap
-    return (OrigChannels == 2)?
-      AMDGPU::getMIMGAtomicOp1(Opc) : AMDGPU::getMIMGAtomicOp2(Opc);
-  } else { // invalid OrigChannels/NewChannels value
-    return -1;
-  }
-}
-
 // Wrapper for Tablegen'd function.  enum Subtarget is not defined in any
 // header files, so we need to wrap it in a function that takes unsigned
 // instead.
@@ -206,10 +183,10 @@ IsaVersion getIsaVersion(const FeatureBitset &Features) {
     return {7, 0, 3};
   if (Features.test(FeatureISAVersion7_0_4))
     return {7, 0, 4};
-  if (Features.test(FeatureSeaIslands))
-    return {7, 0, 0};
 
   // GCN GFX8 (Volcanic Islands (VI)).
+  if (Features.test(FeatureISAVersion8_0_0))
+    return {8, 0, 0};
   if (Features.test(FeatureISAVersion8_0_1))
     return {8, 0, 1};
   if (Features.test(FeatureISAVersion8_0_2))
@@ -218,16 +195,12 @@ IsaVersion getIsaVersion(const FeatureBitset &Features) {
     return {8, 0, 3};
   if (Features.test(FeatureISAVersion8_1_0))
     return {8, 1, 0};
-  if (Features.test(FeatureVolcanicIslands))
-    return {8, 0, 0};
 
   // GCN GFX9.
   if (Features.test(FeatureISAVersion9_0_0))
     return {9, 0, 0};
   if (Features.test(FeatureISAVersion9_0_2))
     return {9, 0, 2};
-  if (Features.test(FeatureGFX9))
-    return {9, 0, 0};
 
   if (!Features.test(FeatureGCN) || Features.test(FeatureSouthernIslands))
     return {0, 0, 0};
@@ -423,7 +396,7 @@ void initDefaultAMDKernelCodeT(amd_kernel_code_t &Header,
   memset(&Header, 0, sizeof(Header));
 
   Header.amd_kernel_code_version_major = 1;
-  Header.amd_kernel_code_version_minor = 2;
+  Header.amd_kernel_code_version_minor = 1;
   Header.amd_machine_kind = 1; // AMD_MACHINE_KIND_AMDGPU
   Header.amd_machine_version_major = ISA.Major;
   Header.amd_machine_version_minor = ISA.Minor;
@@ -452,8 +425,7 @@ bool isGlobalSegment(const GlobalValue *GV) {
 }
 
 bool isReadOnlySegment(const GlobalValue *GV) {
-  return GV->getType()->getAddressSpace() == AMDGPUAS::CONSTANT_ADDRESS ||
-         GV->getType()->getAddressSpace() == AMDGPUAS::CONSTANT_ADDRESS_32BIT;
+  return GV->getType()->getAddressSpace() == AMDGPUAS::CONSTANT_ADDRESS;
 }
 
 bool shouldEmitConstantsToTextSection(const Triple &TT) {
@@ -624,18 +596,6 @@ bool isEntryFunctionCC(CallingConv::ID CC) {
   default:
     return false;
   }
-}
-
-bool hasXNACK(const MCSubtargetInfo &STI) {
-  return STI.getFeatureBits()[AMDGPU::FeatureXNACK];
-}
-
-bool hasMIMG_R128(const MCSubtargetInfo &STI) {
-  return STI.getFeatureBits()[AMDGPU::FeatureMIMG_R128];
-}
-
-bool hasPackedD16(const MCSubtargetInfo &STI) {
-  return !STI.getFeatureBits()[AMDGPU::FeatureUnpackedD16VMem];
 }
 
 bool isSI(const MCSubtargetInfo &STI) {
@@ -931,10 +891,18 @@ namespace llvm {
 namespace AMDGPU {
 
 AMDGPUAS getAMDGPUAS(Triple T) {
+  auto Env = T.getEnvironmentName();
   AMDGPUAS AS;
-  AS.FLAT_ADDRESS = 0;
-  AS.PRIVATE_ADDRESS = 5;
-  AS.REGION_ADDRESS = 2;
+  if (Env == "amdgiz" || Env == "amdgizcl") {
+    AS.FLAT_ADDRESS     = 0;
+    AS.PRIVATE_ADDRESS  = 5;
+    AS.REGION_ADDRESS   = 4;
+  }
+  else {
+    AS.FLAT_ADDRESS     = 4;
+    AS.PRIVATE_ADDRESS  = 0;
+    AS.REGION_ADDRESS   = 5;
+   }
   return AS;
 }
 
@@ -944,22 +912,6 @@ AMDGPUAS getAMDGPUAS(const TargetMachine &M) {
 
 AMDGPUAS getAMDGPUAS(const Module &M) {
   return getAMDGPUAS(Triple(M.getTargetTriple()));
-}
-
-namespace {
-
-struct SourceOfDivergence {
-  unsigned Intr;
-};
-const SourceOfDivergence *lookupSourceOfDivergenceByIntr(unsigned Intr);
-
-#define GET_SOURCEOFDIVERGENCE_IMPL
-#include "AMDGPUGenSearchableTables.inc"
-
-} // end anonymous namespace
-
-bool isIntrinsicSourceOfDivergence(unsigned IntrID) {
-  return lookupSourceOfDivergenceByIntr(IntrID);
 }
 } // namespace AMDGPU
 } // namespace llvm

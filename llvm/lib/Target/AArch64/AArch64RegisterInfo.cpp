@@ -75,25 +75,21 @@ const MCPhysReg *AArch64RegisterInfo::getCalleeSavedRegsViaCopy(
 const uint32_t *
 AArch64RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
                                           CallingConv::ID CC) const {
-  bool SCS = MF.getFunction().hasFnAttribute(Attribute::ShadowCallStack);
   if (CC == CallingConv::GHC)
     // This is academic because all GHC calls are (supposed to be) tail calls
-    return SCS ? CSR_AArch64_NoRegs_SCS_RegMask : CSR_AArch64_NoRegs_RegMask;
+    return CSR_AArch64_NoRegs_RegMask;
   if (CC == CallingConv::AnyReg)
-    return SCS ? CSR_AArch64_AllRegs_SCS_RegMask : CSR_AArch64_AllRegs_RegMask;
+    return CSR_AArch64_AllRegs_RegMask;
   if (CC == CallingConv::CXX_FAST_TLS)
-    return SCS ? CSR_AArch64_CXX_TLS_Darwin_SCS_RegMask
-               : CSR_AArch64_CXX_TLS_Darwin_RegMask;
+    return CSR_AArch64_CXX_TLS_Darwin_RegMask;
   if (MF.getSubtarget<AArch64Subtarget>().getTargetLowering()
           ->supportSwiftError() &&
       MF.getFunction().getAttributes().hasAttrSomewhere(Attribute::SwiftError))
-    return SCS ? CSR_AArch64_AAPCS_SwiftError_SCS_RegMask
-               : CSR_AArch64_AAPCS_SwiftError_RegMask;
+    return CSR_AArch64_AAPCS_SwiftError_RegMask;
   if (CC == CallingConv::PreserveMost)
-    return SCS ? CSR_AArch64_RT_MostRegs_SCS_RegMask
-               : CSR_AArch64_RT_MostRegs_RegMask;
+    return CSR_AArch64_RT_MostRegs_RegMask;
   else
-    return SCS ? CSR_AArch64_AAPCS_SCS_RegMask : CSR_AArch64_AAPCS_RegMask;
+    return CSR_AArch64_AAPCS_RegMask;
 }
 
 const uint32_t *AArch64RegisterInfo::getTLSCallPreservedMask() const {
@@ -116,10 +112,6 @@ AArch64RegisterInfo::getThisReturnPreservedMask(const MachineFunction &MF,
   // both, the function should return NULL (does not currently apply)
   assert(CC != CallingConv::GHC && "should not be GHC calling convention.");
   return CSR_AArch64_AAPCS_ThisReturn_RegMask;
-}
-
-const uint32_t *AArch64RegisterInfo::getWindowsStackProbePreservedMask() const {
-  return CSR_AArch64_StackProbe_Windows_RegMask;
 }
 
 BitVector
@@ -233,13 +225,11 @@ bool AArch64RegisterInfo::requiresVirtualBaseRegisters(
 
 bool
 AArch64RegisterInfo::useFPForScavengingIndex(const MachineFunction &MF) const {
-  // This function indicates whether the emergency spillslot should be placed
-  // close to the beginning of the stackframe (closer to FP) or the end
-  // (closer to SP).
-  //
-  // The beginning works most reliably if we have a frame pointer.
-  const AArch64FrameLowering &TFI = *getFrameLowering(MF);
-  return TFI.hasFP(MF);
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  // AArch64FrameLowering::resolveFrameIndexReference() can always fall back
+  // to the stack pointer, so only put the emergency spill slot next to the
+  // FP when there's no better way to access it (SP or base pointer).
+  return MFI.hasVarSizedObjects() && !hasBasePointer(MF);
 }
 
 bool AArch64RegisterInfo::requiresFrameIndexScavenging(

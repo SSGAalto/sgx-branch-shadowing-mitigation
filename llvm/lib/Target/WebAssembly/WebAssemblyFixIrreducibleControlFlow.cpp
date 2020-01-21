@@ -71,9 +71,6 @@ public:
 } // end anonymous namespace
 
 char WebAssemblyFixIrreducibleControlFlow::ID = 0;
-INITIALIZE_PASS(WebAssemblyFixIrreducibleControlFlow, DEBUG_TYPE,
-                "Removes irreducible control flow", false, false)
-
 FunctionPass *llvm::createWebAssemblyFixIrreducibleControlFlow() {
   return new WebAssemblyFixIrreducibleControlFlow();
 }
@@ -139,7 +136,7 @@ bool WebAssemblyFixIrreducibleControlFlow::VisitLoop(MachineFunction &MF,
   MachineBasicBlock *Header = Loop ? Loop->getHeader() : &*MF.begin();
   SetVector<MachineBasicBlock *> RewriteSuccs;
 
-  // DFS through Loop's body, looking for irreducible control flow. Loop is
+  // DFS through Loop's body, looking for for irreducible control flow. Loop is
   // natural, and we stay in its body, and we treat any nested loops
   // monolithically, so any cycles we encounter indicate irreducibility.
   SmallPtrSet<MachineBasicBlock *, 8> OnStack;

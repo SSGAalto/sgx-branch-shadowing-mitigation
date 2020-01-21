@@ -8,17 +8,11 @@ target triple = "x86_64-apple-macosx10.8.0"
 define i32 @add(i32 %arg) {
 ; CHECK-LABEL: for function 'add'
   ; -- Same size registeres --
-  ;CHECK-AVX512: cost of 12 {{.*}} zext
-  ;CHECK-AVX2: cost of 1 {{.*}} zext
-  ;CHECK-AVX: cost of 1 {{.*}} zext
+  ;CHECK: cost of 1 {{.*}} zext
   %A = zext <4 x i1> undef to <4 x i32>
-  ;CHECK-AVX512: cost of 12 {{.*}} sext
-  ;CHECK-AVX2: cost of 2 {{.*}} sext
-  ;CHECK-AVX: cost of 2 {{.*}} sext
+  ;CHECK: cost of 2 {{.*}} sext
   %B = sext <4 x i1> undef to <4 x i32>
-  ;CHECK-AVX512: cost of 0 {{.*}} trunc
-  ;CHECK-AVX2: cost of 0 {{.*}} trunc
-  ;CHECK-AVX: cost of 0 {{.*}} trunc
+  ;CHECK: cost of 0 {{.*}} trunc
   %C = trunc <4 x i32> undef to <4 x i1>
 
   ; -- Different size registers --

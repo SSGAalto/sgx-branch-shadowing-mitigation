@@ -63,8 +63,7 @@ public:
     IntelKNL,
     IntelSKX,
     IntelCannonlake,
-    IntelIcelakeClient,
-    IntelIcelakeServer,
+    IntelIcelake,
   };
 
 protected:
@@ -92,10 +91,6 @@ protected:
 
   /// True if the processor supports X87 instructions.
   bool HasX87;
-
-  /// True if this processor has NOPL instruction
-  /// (generally pentium pro+).
-  bool HasNOPL;
 
   /// True if this processor has conditional move instructions
   /// (generally pentium pro+).
@@ -233,12 +228,6 @@ protected:
   /// the stack pointer. This is an optimization for Intel Atom processors.
   bool UseLeaForSP;
 
-  /// True if POPCNT instruction has a false dependency on the destination register.
-  bool HasPOPCNTFalseDeps;
-
-  /// True if LZCNT/TZCNT instructions have a false dependency on the destination register.
-  bool HasLZCNTFalseDeps;
-
   /// True if its preferable to combine to a single shuffle using a variable
   /// mask over multiple fixed shuffles.
   bool HasFastVariableShuffle;
@@ -246,14 +235,6 @@ protected:
   /// True if there is no performance penalty to writing only the lower parts
   /// of a YMM or ZMM register without clearing the upper part.
   bool HasFastPartialYMMorZMMWrite;
-
-  /// True if there is no performance penalty for writing NOPs with up to
-  /// 11 bytes.
-  bool HasFast11ByteNOP;
-
-  /// True if there is no performance penalty for writing NOPs with up to
-  /// 15 bytes.
-  bool HasFast15ByteNOP;
 
   /// True if gather is reasonably fast. This is true for Skylake client and
   /// all AVX-512 CPUs.
@@ -360,9 +341,6 @@ protected:
   /// Processor supports Cache Line Write Back instruction
   bool HasCLWB;
 
-  /// Processor support RDPID instruction
-  bool HasRDPID;
-
   /// Use a retpoline thunk rather than indirect calls to block speculative
   /// execution.
   bool UseRetpoline;
@@ -382,9 +360,6 @@ protected:
   ///
   unsigned MaxInlineSizeThreshold;
 
-  /// Indicates target prefers 256 bit instructions.
-  bool Prefer256Bit;
-
   /// What processor and OS we're targeting.
   Triple TargetTriple;
 
@@ -400,16 +375,6 @@ protected:
 private:
   /// Override the stack alignment.
   unsigned StackAlignOverride;
-
-  /// Preferred vector width from function attribute.
-  unsigned PreferVectorWidthOverride;
-
-  /// Resolved preferred vector width from function attribute and subtarget
-  /// features.
-  unsigned PreferVectorWidth;
-
-  /// Required vector width from function attribute.
-  unsigned RequiredVectorWidth;
 
   /// True if compiling for 64-bit, false for 16-bit or 32-bit.
   bool In64BitMode;
@@ -436,9 +401,7 @@ public:
   /// of the specified triple.
   ///
   X86Subtarget(const Triple &TT, StringRef CPU, StringRef FS,
-               const X86TargetMachine &TM, unsigned StackAlignOverride,
-               unsigned PreferVectorWidthOverride,
-               unsigned RequiredVectorWidth);
+               const X86TargetMachine &TM, unsigned StackAlignOverride);
 
   const X86TargetLowering *getTargetLowering() const override {
     return &TLInfo;
@@ -514,7 +477,6 @@ public:
   void setPICStyle(PICStyles::Style Style)  { PICStyle = Style; }
 
   bool hasX87() const { return HasX87; }
-  bool hasNOPL() const { return HasNOPL; }
   bool hasCMov() const { return HasCMov; }
   bool hasSSE1() const { return X86SSELevel >= SSE1; }
   bool hasSSE2() const { return X86SSELevel >= SSE2; }
@@ -525,6 +487,7 @@ public:
   bool hasAVX() const { return X86SSELevel >= AVX; }
   bool hasAVX2() const { return X86SSELevel >= AVX2; }
   bool hasAVX512() const { return X86SSELevel >= AVX512F; }
+  bool hasFp256() const { return hasAVX(); }
   bool hasInt256() const { return hasAVX2(); }
   bool hasSSE4A() const { return HasSSE4A; }
   bool hasMMX() const { return X863DNowLevel >= MMX; }
@@ -583,8 +546,6 @@ public:
   bool hasSSEUnalignedMem() const { return HasSSEUnalignedMem; }
   bool hasCmpxchg16b() const { return HasCmpxchg16b; }
   bool useLeaForSP() const { return UseLeaForSP; }
-  bool hasPOPCNTFalseDeps() const { return HasPOPCNTFalseDeps; }
-  bool hasLZCNTFalseDeps() const { return HasLZCNTFalseDeps; }
   bool hasFastVariableShuffle() const {
     return HasFastVariableShuffle;
   }
@@ -621,33 +582,8 @@ public:
   bool hasIBT() const { return HasIBT; }
   bool hasCLFLUSHOPT() const { return HasCLFLUSHOPT; }
   bool hasCLWB() const { return HasCLWB; }
-  bool hasRDPID() const { return HasRDPID; }
   bool useRetpoline() const { return UseRetpoline; }
   bool useRetpolineExternalThunk() const { return UseRetpolineExternalThunk; }
-
-  unsigned getPreferVectorWidth() const { return PreferVectorWidth; }
-  unsigned getRequiredVectorWidth() const { return RequiredVectorWidth; }
-
-  // Helper functions to determine when we should allow widening to 512-bit
-  // during codegen.
-  // TODO: Currently we're always allowing widening on CPUs without VLX,
-  // because for many cases we don't have a better option.
-  bool canExtendTo512DQ() const {
-    return hasAVX512() && (!hasVLX() || getPreferVectorWidth() >= 512);
-  }
-  bool canExtendTo512BW() const  {
-    return hasBWI() && canExtendTo512DQ();
-  }
-
-  // If there are no 512-bit vectors and we prefer not to use 512-bit registers,
-  // disable them in the legalizer.
-  bool useAVX512Regs() const {
-    return hasAVX512() && (canExtendTo512DQ() || RequiredVectorWidth > 256);
-  }
-
-  bool useBWIRegs() const {
-    return hasBWI() && useAVX512Regs();
-  }
 
   bool isXRaySupported() const override { return is64Bit(); }
 
@@ -656,7 +592,6 @@ public:
   /// TODO: to be removed later and replaced with suitable properties
   bool isAtom() const { return X86ProcFamily == IntelAtom; }
   bool isSLM() const { return X86ProcFamily == IntelSLM; }
-  bool isGLM() const { return X86ProcFamily == IntelGLM; }
   bool useSoftFloat() const { return UseSoftFloat; }
 
   /// Use mfence if we have SSE2 or we're on x86-64 (even if we asked for

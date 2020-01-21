@@ -62,7 +62,7 @@ class DominanceFrontier;
 class DominatorTree;
 class Loop;
 class LoopInfo;
-class PostDominatorTree;
+struct PostDominatorTree;
 class Region;
 template <class RegionTr> class RegionBase;
 class RegionInfo;

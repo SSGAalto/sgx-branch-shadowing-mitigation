@@ -529,7 +529,10 @@ static bool runImpl(Function &F, const TargetLibraryInfo &TLI,
   bool Changed = CCDCE.perform();
 
 // Verify the dominator after we've updated it locally.
-  assert(!DT || DT->verify(DominatorTree::VerificationLevel::Fast));
+#ifndef NDEBUG
+  if (DT)
+    DT->verifyDomTree();
+#endif
   return Changed;
 }
 
