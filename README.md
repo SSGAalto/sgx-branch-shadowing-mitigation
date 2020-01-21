@@ -31,6 +31,8 @@ make
 
 ## 3. Install and run the obfuscating compiler
 
+(source code with history available in [shadow-llvm](https://github.com/SSGAalto/sgx-branch-shadowing-mitigation/tree/shadow-llvm) branch)
+
 ```
 cd llvm
 git clone https://github.com/llvm-mirror/clang.git tools/clang
