@@ -2,7 +2,9 @@
 
 
 # Introduction 
-This work presents a new defense against branch-shadowing to protect the control flow of the program running in an enclave. More precisely, we use compile-time modifications to convert all branch instructions into unconditional branches targeting our in-enclave trampoline code. Detailed description is available in our technical report, available at https://arxiv.org/abs/1808.06478.
+This work presents a new defense against branch-shadowing to protect the control flow of the program running in an enclave. More precisely, we use compile-time modifications to convert all branch instructions into unconditional branches targeting our in-enclave trampoline code. 
+
+Paper available at [*Mitigating Branch-Shadowing Attacks on Intel SGX using Control Flow Randomization*, 2018, SysTEX '18](https://doi.org/10.1145/3268935.3268940).
 
 # Prerequisites
 -Intel SGX SDK for Linux
