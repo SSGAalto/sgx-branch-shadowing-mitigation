@@ -106,11 +106,6 @@ FunctionPass *createX86EvexToVexInsts();
 /// This pass creates the thunks for the retpoline feature.
 FunctionPass *createX86RetpolineThunksPass();
 
-/// This pass converts the branches into Cmovs.
-FunctionPass *createX86BranchConversionPass();
-
-
-
 InstructionSelector *createX86InstructionSelector(const X86TargetMachine &TM,
                                                   X86Subtarget &,
                                                   X86RegisterBankInfo &);
