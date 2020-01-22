@@ -59,6 +59,8 @@ set(sources
   X86WinAllocaExpander.cpp
   X86WinEHState.cpp
   X86CallingConv.cpp
+  X86BranchConversion.cpp
+
   )
 
 add_llvm_target(X86CodeGen ${sources})

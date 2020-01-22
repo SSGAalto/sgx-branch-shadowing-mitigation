@@ -80,6 +80,9 @@ unsigned getCMovFromCond(CondCode CC, unsigned RegBytes,
 // Turn CMov opcode into condition code.
 CondCode getCondFromCMovOpc(unsigned Opc);
 
+// Turn Conditional Branch opcode into condition code.
+CondCode getCondFromBranchOpc(unsigned BrOpc);
+
 /// GetOppositeBranchCondition - Return the inverse of the specified cond,
 /// e.g. turning COND_E to COND_NE.
 CondCode GetOppositeBranchCondition(CondCode CC);
