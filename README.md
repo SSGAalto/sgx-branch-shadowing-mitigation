@@ -1,15 +1,47 @@
 # SGX Branch Shadowing Mitigation
 
-
 # Introduction 
 This work presents a new defense against branch-shadowing to protect the control flow of the program running in an enclave. More precisely, we use compile-time modifications to convert all branch instructions into unconditional branches targeting our in-enclave trampoline code. 
 
 Paper available at [*Mitigating Branch-Shadowing Attacks on Intel SGX using Control Flow Randomization*, 2018, SysTEX '18](https://doi.org/10.1145/3268935.3268940).
 
 # Prerequisites
--Intel SGX SDK for Linux
 
--LLVM compiler
+- Intel SGX SDK for Linux
+- LLVM compiler
+
+# Build and run the obfuscating compiler
+
+## 1. Build modified LLVM
+
+**Note:** LLVM modifications can be studied in the commit history. The [shadow-llvm](https://github.com/SSGAalto/sgx-branch-shadowing-mitigation/tree/shadow-llvm) branch contains the unmodified LLVM `release_60` source code on which the modifications are based.
+
+```bash
+cd llvm
+git clone https://github.com/llvm-mirror/clang.git tools/clang
+cd tools/clang
+git checkout release_60
+cd ../..
+mkdir build
+cd build
+cmake ..
+make
+```
+
+## 2. Build hardened example code
+
+```bash
+export CLANG=../llvm/build/bin/clang
+cd victim_example
+$CLANG -c victim.c -o victim-plain.o
+objdump -D victim-plain.o -j .text
+$CLANG -mllvm -x86-branch-conversion -mllvm -debug-only=x86-branch-conversion -c victim.c -o victim-mitigated.o
+objdump -D victim-mitigated.o -j .text
+$CLANG -mllvm -x86-branch-conversion -mllvm -x86-bc-dummy-instr -mllvm -debug-only=x86-branch-conversion -c victim.c -o victim-mitigated-dummy.o
+objdump -D victim-mitigated-dummy.o -j .text
+```
+
+# Build and run branch shadowing attack test application
 
 ## 1. Install chardev device for reading LBR
 
@@ -27,19 +59,6 @@ cmake ..
 make
 ./app_hw -h             # for options
 ./run_enclave_jne.pl    # to run everything
-```
-
-## 3. Install and run the obfuscating compiler
-
-(source code with history available in [shadow-llvm](https://github.com/SSGAalto/sgx-branch-shadowing-mitigation/tree/shadow-llvm) branch)
-
-```
-cd llvm
-git clone https://github.com/llvm-mirror/clang.git tools/clang
-mkdir build
-cd build
-cmake ..
-make
 ```
 
 # Licence information
